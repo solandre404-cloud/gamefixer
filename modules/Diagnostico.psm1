@@ -41,8 +41,8 @@ function Invoke-Diagnostico {
     try {
         Get-CimInstance Win32_VideoController | ForEach-Object {
             Write-UI ("      " + $_.Name) -Color Green
-            if ($_.AdapterRAM) {
-                $vramGB = [math]::Round($_.AdapterRAM / 1GB, 1)
+            $vramGB = Get-GPUVRam -GpuName $_.Name -Fallback $_.AdapterRAM
+            if ($vramGB -gt 0) {
                 Write-UI ("      VRAM          : {0} GB" -f $vramGB) -Color Green
             }
             Write-UI ("      Driver        : " + $_.DriverVersion) -Color Green

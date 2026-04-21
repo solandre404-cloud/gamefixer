@@ -174,14 +174,32 @@ function Show-TelemetryPanels {
     Write-UI ('-' * 15) -Color Cyan -NoNewline
     Write-UI "+" -Color Cyan
 
-    # Reservar espacio (4 filas de contenido + 1 de cierre)
-    for ($i = 0; $i -lt 5; $i++) { Write-Host "" }
+    # Numero de filas depende de cuantos discos hay (max 4 para no romper layout)
+    $diskCount = if ($stats.Disks) { [math]::Min($stats.Disks.Count, 4) } else { 1 }
+    $contentRows = 3 + $diskCount  # CPU + GPU + RAM + N discos
+    $healthLabels = @('OS','Net','Services','Last run','Disks','Admin')
+
+    # Reservar espacio
+    $reserveRows = [math]::Max($contentRows, $healthLabels.Count) + 1
+    for ($i = 0; $i -lt $reserveRows; $i++) { Write-Host "" }
 
     # HARDWARE (columna izquierda)
     Write-BarAt -Row ($startRow + 1) -Col ($colL + 2) -Label "CPU"  -Percent $stats.CPU  -Extra ("{0}C" -f $stats.CPUTemp)
     Write-BarAt -Row ($startRow + 2) -Col ($colL + 2) -Label "GPU"  -Percent $stats.GPU  -Extra ("{0}C" -f $stats.GPUTemp)
     Write-BarAt -Row ($startRow + 3) -Col ($colL + 2) -Label "RAM"  -Percent $stats.RAM  -Extra ("{0}/{1}GB" -f $stats.RAMUsedGB, $stats.RAMTotalGB)
-    Write-BarAt -Row ($startRow + 4) -Col ($colL + 2) -Label "DISK" -Percent $stats.Disk -Extra ("{0}/{1}GB" -f $stats.DiskUsedGB, $stats.DiskTotalGB)
+
+    # Una barra por disco (hasta 4)
+    if ($stats.Disks -and $stats.Disks.Count -gt 0) {
+        $shown = [math]::Min($stats.Disks.Count, 4)
+        for ($i = 0; $i -lt $shown; $i++) {
+            $d = $stats.Disks[$i]
+            $label = $d.Drive.TrimEnd(':')
+            Write-BarAt -Row ($startRow + 4 + $i) -Col ($colL + 2) -Label $label `
+                -Percent $d.Percent -Extra ("{0}/{1}GB" -f $d.UsedGB, $d.TotalGB)
+        }
+    } else {
+        Write-BarAt -Row ($startRow + 4) -Col ($colL + 2) -Label "DISK" -Percent $stats.Disk -Extra ("{0}/{1}GB" -f $stats.DiskUsedGB, $stats.DiskTotalGB)
+    }
 
     # SYSTEM HEALTH (columna derecha)
     $osShort = $stats.OS
@@ -194,15 +212,23 @@ function Show-TelemetryPanels {
     $svcColor = if ($stats.Services -eq 'OK') { 'Green' } else { 'Yellow' }
     Write-LabelAt -Row ($startRow + 3) -Col ($colR + 2) -Label "Services" -Value $stats.Services -ValColor $svcColor
     Write-LabelAt -Row ($startRow + 4) -Col ($colR + 2) -Label "Last run" -Value $stats.LastRun
+    if ($stats.Disks) {
+        $disksInfo = "$($stats.Disks.Count) drives ($($stats.DiskTotalGB)GB)"
+        Write-LabelAt -Row ($startRow + 5) -Col ($colR + 2) -Label "Storage" -Value $disksInfo
+    }
+    $adminTxt = if ($Global:GF.IsAdmin) { 'YES' } else { 'NO' }
+    $adminCol = if ($Global:GF.IsAdmin) { 'Green' } else { 'Yellow' }
+    Write-LabelAt -Row ($startRow + 6) -Col ($colR + 2) -Label "Admin"    -Value $adminTxt -ValColor $adminCol
 
-    # Pies de los paneles
-    [Console]::SetCursorPosition($colL, $startRow + 5)
+    # Pies de los paneles (se ajustan dinamicamente)
+    $footerRow = $startRow + $reserveRows
+    [Console]::SetCursorPosition($colL, $footerRow)
     Write-UI ('+' + ('-' * 39) + '+') -Color Cyan -NoNewline
-    [Console]::SetCursorPosition($colR, $startRow + 5)
+    [Console]::SetCursorPosition($colR, $footerRow)
     Write-UI ('+' + ('-' * 33) + '+') -Color Cyan
 
     # Mover cursor a la siguiente linea limpia
-    [Console]::SetCursorPosition(0, $startRow + 6)
+    [Console]::SetCursorPosition(0, $footerRow + 1)
     Write-Host ""
 }
 
@@ -211,6 +237,12 @@ function Show-TelemetryPanels {
 # ----------------------------------------------------------------------------
 function Show-MainMenu {
     Write-UI ("=== MENU PRINCIPAL " + ("=" * 57)) -Color Cyan
+    Write-Host ""
+
+    # Fila destacada: AutoFix arriba del todo
+    Write-UI "  " -NoNewline
+    Write-Badge -Text ' [A] AUTO-FIX ' -Bg DarkGreen -Fg White
+    Write-UI "  Pipeline completo en un solo click (recomendado)" -Color Yellow
     Write-Host ""
 
     $items = @(
@@ -236,19 +268,16 @@ function Show-MainMenu {
 
         $row = [Console]::CursorTop
 
-        # Opcion izquierda (linea principal)
         [Console]::SetCursorPosition($colL, $row)
         Write-UI ("[{0}] " -f $left.Key) -Color Yellow -NoNewline
         Write-UI $left.Text              -Color Green  -NoNewline
 
-        # Opcion derecha (linea principal)
         if ($right) {
             [Console]::SetCursorPosition($colR, $row)
             Write-UI ("[{0}] " -f $right.Key) -Color Yellow -NoNewline
             Write-UI $right.Text              -Color Green  -NoNewline
         }
 
-        # Subtitulos en fila siguiente
         Write-Host ""
         $row2 = [Console]::CursorTop
 
@@ -262,6 +291,23 @@ function Show-MainMenu {
 
         Write-Host ""
     }
+    Write-Host ""
+
+    # Segunda fila de opciones avanzadas
+    Write-UI "  NUEVO EN v2.02:" -Color Cyan
+    Write-UI "  [B] " -Color Yellow -NoNewline
+    Write-UI "Benchmarks " -Color Green -NoNewline
+    Write-UI ("(CPU/RAM/Disk/Red) ") -Color DarkGray -NoNewline
+    Write-UI "  [G] " -Color Yellow -NoNewline
+    Write-UI "Detectar Juegos " -Color Green -NoNewline
+    Write-UI "(Steam, Epic...)" -Color DarkGray
+
+    Write-UI "  [T] " -Color Yellow -NoNewline
+    Write-UI "Tweaks por Juego " -Color Green -NoNewline
+    Write-UI ("(CS2, Valo, LoL)   ") -Color DarkGray -NoNewline
+    Write-UI "  [X] " -Color Yellow -NoNewline
+    Write-UI "Plugins " -Color Green -NoNewline
+    Write-UI "(extensiones custom)" -Color DarkGray
     Write-Host ""
 }
 
@@ -303,6 +349,12 @@ function Show-Footer {
     Write-UI $Global:GF.LogFile -Color DarkGray
     Write-Host ""
     Write-UI "  > Selecciona una opcion: " -Color Cyan -NoNewline
+}
+
+function Pause-Submenu {
+    Write-Host ""
+    Write-UI "  Presiona ENTER para volver al submenu..." -Color DarkGreen -NoNewline
+    [void](Read-Host)
 }
 
 function Show-Section {
@@ -380,4 +432,4 @@ function Show-Help {
 Export-ModuleMember -Function Write-UI, Write-Badge, Write-TypeLine, Write-BarAt, `
     Write-LabelAt, Show-BootAnimation, Show-Banner, Show-TopBar, Show-StatusLine, `
     Show-TelemetryPanels, Show-UpdateBanner, Show-MainMenu, Show-Footer, `
-    Show-Section, Show-Logs, Show-Config, Show-Help, Confirm-Action
+    Show-Section, Show-Logs, Show-Config, Show-Help, Confirm-Action, Pause-Submenu

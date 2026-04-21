@@ -1,73 +1,79 @@
-# GAMEFIXER v2.1 — FamiliaCuba Edition
+# GAMEFIXER v2.02 — FamiliaCuba Edition
 
 Herramienta profesional de diagnóstico, optimización y reparación de Windows orientada a gaming. Escrita en PowerShell puro, arquitectura modular, con logging, backups y modo DRY-RUN.
 
+## Novedades v2.02
+
+- **AUTO-FIX [A]** — pipeline completo en un solo click: restore point → benchmark antes → diagnóstico → limpieza → optimización → benchmark después → reporte HTML
+- **Benchmarks [B]** — tests reales de CPU (single+multi thread), RAM, disco y red. Historial + comparativa antes/después
+- **Detector de juegos [G]** — detecta Steam, Epic, Riot, Battle.net, Ubisoft, EA, GOG, Xbox App. Lista todos los juegos instalados con tamaños
+- **Tweaks por juego [T]** — optimizaciones específicas para CS2, Valorant, LoL, Fortnite, GTA V, RDR2, Minecraft, Apex, R6
+- **Reporte HTML** — al terminar AutoFix se genera un reporte visual profesional tipo dashboard que abre en el navegador
+- **Sistema de plugins [X]** — dropeás un `.psm1` en `/plugins` y se carga automáticamente. Un plugin de ejemplo ya viene incluido
+- **Auto-update desde GitHub [U]** — check silencioso al arrancar, banner amarillo si hay versión nueva, update con un click
+
 ## Características
 
-- **Diagnóstico completo** del sistema (hardware, OS, red, eventos críticos)
+- **Diagnóstico completo** (hardware, OS, red, eventos críticos)
 - **Optimización Gamer** con tweaks reales del registro (MMCSS, GameDVR, TCP Nagle, servicios)
-- **Módulo GPU NVIDIA** usando `nvidia-smi` (monitoreo en vivo, limpieza de shader cache, power limit)
-- **Diagnóstico de red** (latencia a DNS populares, cambio de DNS a Cloudflare/Google, flush completo)
-- **Reparación del sistema** (SFC, DISM, chkdsk, reparación de Windows Store y .NET)
-- **Limpieza inteligente** (temp, cache, prefetch, logs, thumbnails, cachés de navegadores)
-- **Soluciones comunes de gaming** (stuttering, audio desync, input lag, HAGS, mouse accel)
-- **Rollback** con backups automáticos del registro + puntos de restauración
-- **Chequeo de salud** (SMART, eventos críticos, actualizaciones)
-- **Perfiles** predefinidos: Gamer, Oficina, Ahorro, Streaming
+- **GPU NVIDIA** con `nvidia-smi` (monitoreo, shader cache, power limit)
+- **Red** (latencia, cambio DNS, flush, speed test)
+- **Reparación** (SFC, DISM, chkdsk, Store, .NET)
+- **Limpieza inteligente** (temp, cache, prefetch, browsers)
+- **Soluciones gaming** (stuttering, audio, input lag, HAGS, mouse)
+- **Rollback** con backups automáticos del registro + System Restore
+- **Salud** (SMART, eventos críticos, hotfixes)
+- **Perfiles** Gamer / Oficina / Ahorro / Streaming
 
 ## Extras profesionales
 
-- **Auto-elevación** a administrador al ejecutar
-- **DRY-RUN por defecto** — nada se aplica hasta que lo activas con `-Live` o `[D]` en menú
-- **Logging** a archivo con timestamps y niveles (DEBUG/INFO/WARN/ERROR/ACTION)
+- **Auto-elevación** a administrador
+- **DRY-RUN por defecto** — nada se aplica hasta que lo actives
+- **Logging** a archivo con timestamps y niveles
 - **Backups automáticos** del registro antes de cada cambio
 - **Animación de boot** estilo typewriter
-- **Top bar** con hostname, admin status, uptime y reloj en vivo
-- **Telemetría** en vivo: CPU + temp, GPU NVIDIA + temp, RAM, disco, red, servicios
+- **Top bar** con hostname, admin, uptime y reloj en vivo
+- **Telemetría en vivo**: CPU + temp, GPU NVIDIA + temp, RAM, disco, red
 
 ## Estructura
 
 ```
 GameFixer/
-├── GameFixer.ps1              # Entry point (main loop)
-├── GameFixer.bat              # Launcher con doble-click
-├── README.md                  # Este archivo
+├── GameFixer.ps1              # Entry point
+├── GameFixer.bat              # Launcher doble-click
+├── README.md
+├── version.txt                # Sincroniza con releases de GitHub
 ├── modules/
-│   ├── UI.psm1                # Interfaz, colores, banner, paneles
-│   ├── Logger.psm1            # Sistema de logging
-│   ├── Telemetry.psm1         # Stats del sistema
-│   ├── Diagnostico.psm1
-│   ├── OptimizacionGamer.psm1
-│   ├── GPU.psm1
-│   ├── Red.psm1
-│   ├── Reparacion.psm1
-│   ├── Limpieza.psm1
-│   ├── SolucionesComunes.psm1
-│   ├── Rollback.psm1
-│   ├── Salud.psm1
-│   └── Perfiles.psm1
-├── logs/                      # Logs de sesión (se crea automáticamente)
-└── backups/                   # Backups del registro (se crea automáticamente)
+│   ├── UI.psm1
+│   ├── Logger.psm1
+│   ├── Telemetry.psm1
+│   ├── Updater.psm1           # Auto-update desde GitHub
+│   ├── Benchmark.psm1         # NUEVO v2.02
+│   ├── HtmlReport.psm1        # NUEVO v2.02
+│   ├── GameDetector.psm1      # NUEVO v2.02
+│   ├── GameTweaks.psm1        # NUEVO v2.02
+│   ├── AutoFix.psm1           # NUEVO v2.02
+│   ├── PluginLoader.psm1      # NUEVO v2.02
+│   └── (módulos de funcionalidad)
+├── plugins/
+│   └── ejemplo.psm1           # Plugin de ejemplo (reloj ASCII)
+├── logs/
+├── backups/
+├── benchmarks/                # Historial de benchmarks en JSON
+└── reports/                   # Reportes HTML generados por AutoFix
 ```
 
 ## Uso
 
-**Opción 1 — doble click:** ejecuta `GameFixer.bat`.
+**Doble-click:** ejecuta `GameFixer.bat`.
 
-**Opción 2 — terminal:**
+**Desde terminal:**
 
 ```powershell
-# Modo DRY-RUN (default, solo simula)
-.\GameFixer.ps1
-
-# Modo real
-.\GameFixer.ps1 -Live
-
-# Sin animación de boot
-.\GameFixer.ps1 -NoBanner
-
-# Con un perfil específico
-.\GameFixer.ps1 -Profile GAMER
+.\GameFixer.ps1              # DRY-RUN (simula)
+.\GameFixer.ps1 -Live        # Modo real
+.\GameFixer.ps1 -NoBanner    # Sin animación de boot
+.\GameFixer.ps1 -NoUpdate    # Sin check de updates
 ```
 
 ## Requisitos
@@ -75,14 +81,28 @@ GameFixer/
 - Windows 10 / 11
 - PowerShell 5.1+
 - Permisos de administrador (se auto-eleva)
-- Opcional: `nvidia-smi` en PATH (viene con drivers NVIDIA)
+- Opcional: `nvidia-smi` en PATH para GPU data
 
-## Seguridad
+## Crear un plugin
 
-Antes de aplicar cambios al registro, el script crea un backup en `/backups/regbackup-<timestamp>/`. Puedes revertir cualquier cambio desde el menú **[8] Rollback**.
+Copia `plugins/ejemplo.psm1`, renómbralo y modifica el bloque `$Global:PluginInfo`:
 
-Adicionalmente, desde `[8] → [3]` puedes crear un punto de restauración del sistema antes de operar.
+```powershell
+$Global:PluginInfo = @{
+    Name        = 'Mi Plugin'
+    Version     = '1.0'
+    Author      = 'Tu nombre'
+    Description = 'Qué hace'
+    EntryPoint  = 'Invoke-MiFuncion'
+}
+
+function Invoke-MiFuncion {
+    Write-UI "Hola mundo" -Color Green
+}
+
+Export-ModuleMember -Function Invoke-MiFuncion
+```
 
 ## Licencia
 
-MIT. FamiliaCuba.com
+MIT. Úsalo, modifícalo, gana tu competencia.

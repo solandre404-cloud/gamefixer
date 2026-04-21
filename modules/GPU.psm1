@@ -4,34 +4,38 @@
 # ============================================================================
 
 function Invoke-GPUMenu {
-    Show-Section "MODULO GPU (NVIDIA)"
+    do {
+        Clear-Host
+        Show-Section "MODULO GPU (NVIDIA)"
 
-    $g = Get-NvidiaGPUStats
-    if ($g.Available) {
-        Write-UI ("  Estado actual: uso {0}% @ {1}°C" -f $g.Usage, $g.Temp) -Color Green
-    } else {
-        Write-UI "  nvidia-smi no disponible. Driver NVIDIA no detectado." -Color Yellow
-    }
+        $g = Get-NvidiaGPUStats
+        if ($g.Available) {
+            Write-UI ("  Estado actual: uso {0}% @ {1}°C" -f $g.Usage, $g.Temp) -Color Green
+        } else {
+            Write-UI "  nvidia-smi no disponible. Driver NVIDIA no detectado." -Color Yellow
+        }
 
-    Write-Host ""
-    Write-UI "  [1] Mostrar info detallada del driver" -Color Yellow
-    Write-UI "  [2] Limpiar shader cache (DirectX + NVIDIA)" -Color Yellow
-    Write-UI "  [3] Monitoreo en vivo (10 segundos)" -Color Yellow
-    Write-UI "  [4] Forzar modo maximo rendimiento" -Color Yellow
-    Write-UI "  [5] Verificar version driver vs ultima disponible (info)" -Color Yellow
-    Write-UI "  [B] Volver" -Color Yellow
-    Write-Host ""
-    Write-UI "  > " -Color Cyan -NoNewline
-    $sub = (Read-Host).Trim().ToUpper()
+        Write-Host ""
+        Write-UI "  [1] Mostrar info detallada del driver" -Color Yellow
+        Write-UI "  [2] Limpiar shader cache (DirectX + NVIDIA)" -Color Yellow
+        Write-UI "  [3] Monitoreo en vivo (10 segundos)" -Color Yellow
+        Write-UI "  [4] Forzar modo maximo rendimiento" -Color Yellow
+        Write-UI "  [5] Verificar version driver vs ultima disponible (info)" -Color Yellow
+        Write-UI "  [B] Volver al menu principal" -Color Yellow
+        Write-Host ""
+        Write-UI "  > " -Color Cyan -NoNewline
+        $sub = (Read-Host).Trim().ToUpper()
 
-    switch ($sub) {
-        '1' { Show-GPUInfo }
-        '2' { Clear-ShaderCache }
-        '3' { Watch-GPU }
-        '4' { Set-GPUMaxPerformance }
-        '5' { Test-GPUDriverVersion }
-        default { return }
-    }
+        switch ($sub) {
+            '1' { Show-GPUInfo;            Pause-Submenu }
+            '2' { Clear-ShaderCache;       Pause-Submenu }
+            '3' { Watch-GPU;               Pause-Submenu }
+            '4' { Set-GPUMaxPerformance;   Pause-Submenu }
+            '5' { Test-GPUDriverVersion;   Pause-Submenu }
+            'B' { return }
+            default { }
+        }
+    } while ($true)
 }
 
 function Show-GPUInfo {

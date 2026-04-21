@@ -4,26 +4,30 @@
 # ============================================================================
 
 function Invoke-Perfiles {
-    Show-Section "PERFILES DE SISTEMA"
+    do {
+        Clear-Host
+        Show-Section "PERFILES DE SISTEMA"
 
-    Write-UI "  Perfil actual: $($Global:GF.Profile)" -Color Cyan
-    Write-Host ""
-    Write-UI "  [1] GAMER      - maximo rendimiento, low latency" -Color Yellow
-    Write-UI "  [2] OFICINA    - balanceado, notificaciones activas" -Color Yellow
-    Write-UI "  [3] AHORRO     - minima energia, laptop lejos del enchufe" -Color Yellow
-    Write-UI "  [4] STREAMING  - CPU/GPU balanceado para OBS + juego" -Color Yellow
-    Write-UI "  [B] Volver" -Color Yellow
-    Write-Host ""
-    Write-UI "  > " -Color Cyan -NoNewline
-    $sub = (Read-Host).Trim().ToUpper()
+        Write-UI "  Perfil actual: $($Global:GF.Profile)" -Color Cyan
+        Write-Host ""
+        Write-UI "  [1] GAMER      - maximo rendimiento, low latency" -Color Yellow
+        Write-UI "  [2] OFICINA    - balanceado, notificaciones activas" -Color Yellow
+        Write-UI "  [3] AHORRO     - minima energia, laptop lejos del enchufe" -Color Yellow
+        Write-UI "  [4] STREAMING  - CPU/GPU balanceado para OBS + juego" -Color Yellow
+        Write-UI "  [B] Volver al menu principal" -Color Yellow
+        Write-Host ""
+        Write-UI "  > " -Color Cyan -NoNewline
+        $sub = (Read-Host).Trim().ToUpper()
 
-    switch ($sub) {
-        '1' { Apply-ProfileGamer }
-        '2' { Apply-ProfileOficina }
-        '3' { Apply-ProfileAhorro }
-        '4' { Apply-ProfileStreaming }
-        default { return }
-    }
+        switch ($sub) {
+            '1' { Apply-ProfileGamer;     Pause-Submenu }
+            '2' { Apply-ProfileOficina;   Pause-Submenu }
+            '3' { Apply-ProfileAhorro;    Pause-Submenu }
+            '4' { Apply-ProfileStreaming; Pause-Submenu }
+            'B' { return }
+            default { }
+        }
+    } while ($true)
 }
 
 function Apply-ProfileGamer {

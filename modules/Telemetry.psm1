@@ -3,6 +3,74 @@
 #  Lectura de stats del sistema en tiempo real
 # ============================================================================
 
+function Get-GPUVRam {
+    <#
+    .SYNOPSIS
+    Lee la VRAM correcta de la GPU. Win32_VideoController.AdapterRAM es UInt32
+    que satura a 4 GB, por lo que GPUs de 8/12/16/24 GB muestran siempre 4.
+    Prioridad:
+      1) nvidia-smi (mas preciso)
+      2) Registro HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968...} \HardwareInformation.qwMemorySize (QWORD, reporta real)
+      3) Fallback al AdapterRAM
+    #>
+    param(
+        [string]$GpuName,
+        [long]$Fallback = 0
+    )
+
+    # 1) nvidia-smi
+    if (Get-Command 'nvidia-smi' -ErrorAction SilentlyContinue) {
+        try {
+            $out = & nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>$null
+            if ($LASTEXITCODE -eq 0 -and $out) {
+                # nvidia-smi devuelve en MiB
+                $lines = @($out -split "`n" | Where-Object { $_ -match '^\s*\d' })
+                foreach ($line in $lines) {
+                    $mib = [int]($line.Trim())
+                    if ($mib -gt 0) {
+                        return [math]::Round($mib / 1024, 1)
+                    }
+                }
+            }
+        } catch {}
+    }
+
+    # 2) Registro (qwMemorySize es QWORD de 64 bits, valor correcto)
+    try {
+        $classKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}'
+        if (Test-Path $classKey) {
+            $subkeys = Get-ChildItem $classKey -ErrorAction SilentlyContinue |
+                       Where-Object { $_.PSChildName -match '^\d{4}$' }
+            foreach ($sk in $subkeys) {
+                $props = Get-ItemProperty $sk.PSPath -ErrorAction SilentlyContinue
+                # Match con nombre o tomar cualquiera si no se especifica
+                $matchName = if ($GpuName) {
+                    $props.DriverDesc -like "*$GpuName*" -or $GpuName -like "*$($props.DriverDesc)*"
+                } else { $true }
+                if ($matchName -and $props.'HardwareInformation.qwMemorySize') {
+                    $bytes = [long]$props.'HardwareInformation.qwMemorySize'
+                    if ($bytes -gt 0) {
+                        return [math]::Round($bytes / 1GB, 1)
+                    }
+                }
+                # Fallback al campo viejo 'HardwareInformation.MemorySize' (DWORD, limitado a 4GB)
+                if ($matchName -and $props.'HardwareInformation.MemorySize') {
+                    $bytes = [long]$props.'HardwareInformation.MemorySize'
+                    if ($bytes -gt 0) {
+                        return [math]::Round($bytes / 1GB, 1)
+                    }
+                }
+            }
+        }
+    } catch {}
+
+    # 3) Fallback
+    if ($Fallback -gt 0) {
+        return [math]::Round($Fallback / 1GB, 1)
+    }
+    return 0
+}
+
 function Get-NvidiaGPUStats {
     <#
     .SYNOPSIS
@@ -61,12 +129,27 @@ function Get-TelemetryStats {
         $ramPct     = [int](($ramUsedGB / $ramTotalGB) * 100)
     } catch { $ramPct = 0; $ramTotalGB = 0; $ramUsedGB = 0 }
 
-    # --- Disk C: ---
+    # --- Discos (TODOS los locales, no solo C:) ---
+    $allDisks = @()
     try {
-        $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
-        $diskTotalGB = [math]::Round($disk.Size / 1GB, 0)
-        $diskUsedGB  = [math]::Round(($disk.Size - $disk.FreeSpace) / 1GB, 0)
-        $diskPct     = [int](($diskUsedGB / $diskTotalGB) * 100)
+        $disks = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3"
+        $diskTotalGB = 0
+        $diskUsedGB  = 0
+        foreach ($d in $disks) {
+            $totGB  = [math]::Round($d.Size / 1GB, 0)
+            $usedGB = [math]::Round(($d.Size - $d.FreeSpace) / 1GB, 0)
+            $pct    = if ($d.Size -gt 0) { [int]((($d.Size - $d.FreeSpace) / $d.Size) * 100) } else { 0 }
+            $diskTotalGB += $totGB
+            $diskUsedGB  += $usedGB
+            $allDisks += [pscustomobject]@{
+                Drive    = $d.DeviceID
+                TotalGB  = $totGB
+                UsedGB   = $usedGB
+                FreeGB   = $totGB - $usedGB
+                Percent  = $pct
+            }
+        }
+        $diskPct = if ($diskTotalGB -gt 0) { [int](($diskUsedGB / $diskTotalGB) * 100) } else { 0 }
     } catch { $diskPct = 0; $diskTotalGB = 0; $diskUsedGB = 0 }
 
     # --- OS ---
@@ -124,6 +207,7 @@ function Get-TelemetryStats {
         Disk         = $diskPct
         DiskUsedGB   = $diskUsedGB
         DiskTotalGB  = $diskTotalGB
+        Disks        = $allDisks
         OS           = "$osName ($osVersion)"
         NetStatus    = $netStatus
         Services     = $servicesStatus
@@ -131,4 +215,4 @@ function Get-TelemetryStats {
     }
 }
 
-Export-ModuleMember -Function Get-TelemetryStats, Get-NvidiaGPUStats, Get-CPUTemp
+Export-ModuleMember -Function Get-TelemetryStats, Get-NvidiaGPUStats, Get-CPUTemp, Get-GPUVRam

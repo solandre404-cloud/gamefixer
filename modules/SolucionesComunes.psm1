@@ -4,32 +4,36 @@
 # ============================================================================
 
 function Invoke-SolucionesComunes {
-    Show-Section "SOLUCIONES COMUNES DE GAMING"
+    do {
+        Clear-Host
+        Show-Section "SOLUCIONES COMUNES DE GAMING"
 
-    Write-UI "  [1] Stuttering / FPS drops (limpiar DirectX cache + shader)" -Color Yellow
-    Write-UI "  [2] Desync de audio (reiniciar servicios de audio)" -Color Yellow
-    Write-UI "  [3] Juego no abre / crash al iniciar (reparar VC++ runtimes)" -Color Yellow
-    Write-UI "  [4] Input lag (reconfigurar HID + USB selective suspend)" -Color Yellow
-    Write-UI "  [5] Xbox Game Bar no funciona" -Color Yellow
-    Write-UI "  [6] Problemas con anti-cheat (EAC/BattlEye check)" -Color Yellow
-    Write-UI "  [7] Mouse acceleration OFF (precision del raton)" -Color Yellow
-    Write-UI "  [8] Hardware Accelerated GPU Scheduling (HAGS) ON" -Color Yellow
-    Write-UI "  [B] Volver" -Color Yellow
-    Write-Host ""
-    Write-UI "  > " -Color Cyan -NoNewline
-    $sub = (Read-Host).Trim().ToUpper()
+        Write-UI "  [1] Stuttering / FPS drops (limpiar DirectX cache + shader)" -Color Yellow
+        Write-UI "  [2] Desync de audio (reiniciar servicios de audio)" -Color Yellow
+        Write-UI "  [3] Juego no abre / crash al iniciar (reparar VC++ runtimes)" -Color Yellow
+        Write-UI "  [4] Input lag (reconfigurar HID + USB selective suspend)" -Color Yellow
+        Write-UI "  [5] Xbox Game Bar no funciona" -Color Yellow
+        Write-UI "  [6] Problemas con anti-cheat (EAC/BattlEye check)" -Color Yellow
+        Write-UI "  [7] Mouse acceleration OFF (precision del raton)" -Color Yellow
+        Write-UI "  [8] Hardware Accelerated GPU Scheduling (HAGS) ON" -Color Yellow
+        Write-UI "  [B] Volver al menu principal" -Color Yellow
+        Write-Host ""
+        Write-UI "  > " -Color Cyan -NoNewline
+        $sub = (Read-Host).Trim().ToUpper()
 
-    switch ($sub) {
-        '1' { Fix-Stuttering }
-        '2' { Fix-Audio }
-        '3' { Fix-VCRuntimes }
-        '4' { Fix-InputLag }
-        '5' { Fix-XboxGameBar }
-        '6' { Test-AntiCheat }
-        '7' { Disable-MouseAccel }
-        '8' { Enable-HAGS }
-        default { return }
-    }
+        switch ($sub) {
+            '1' { Fix-Stuttering;     Pause-Submenu }
+            '2' { Fix-Audio;          Pause-Submenu }
+            '3' { Fix-VCRuntimes;     Pause-Submenu }
+            '4' { Fix-InputLag;       Pause-Submenu }
+            '5' { Fix-XboxGameBar;    Pause-Submenu }
+            '6' { Test-AntiCheat;     Pause-Submenu }
+            '7' { Disable-MouseAccel; Pause-Submenu }
+            '8' { Enable-HAGS;        Pause-Submenu }
+            'B' { return }
+            default { }
+        }
+    } while ($true)
 }
 
 function Fix-Stuttering {

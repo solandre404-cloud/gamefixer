@@ -4,28 +4,32 @@
 # ============================================================================
 
 function Invoke-Reparacion {
-    Show-Section "REPARACION DEL SISTEMA"
+    do {
+        Clear-Host
+        Show-Section "REPARACION DEL SISTEMA"
 
-    Write-UI "  [1] SFC /scannow (reparar archivos sistema)" -Color Yellow
-    Write-UI "  [2] DISM /RestoreHealth (reparar imagen Windows)" -Color Yellow
-    Write-UI "  [3] CHKDSK C: (disco - solo lectura)" -Color Yellow
-    Write-UI "  [4] SFC + DISM combinado (recomendado)" -Color Yellow
-    Write-UI "  [5] Reparar tienda de Windows" -Color Yellow
-    Write-UI "  [6] Reparar componentes .NET" -Color Yellow
-    Write-UI "  [B] Volver" -Color Yellow
-    Write-Host ""
-    Write-UI "  > " -Color Cyan -NoNewline
-    $sub = (Read-Host).Trim().ToUpper()
+        Write-UI "  [1] SFC /scannow (reparar archivos sistema)" -Color Yellow
+        Write-UI "  [2] DISM /RestoreHealth (reparar imagen Windows)" -Color Yellow
+        Write-UI "  [3] CHKDSK C: (disco - solo lectura)" -Color Yellow
+        Write-UI "  [4] SFC + DISM combinado (recomendado)" -Color Yellow
+        Write-UI "  [5] Reparar tienda de Windows" -Color Yellow
+        Write-UI "  [6] Reparar componentes .NET" -Color Yellow
+        Write-UI "  [B] Volver al menu principal" -Color Yellow
+        Write-Host ""
+        Write-UI "  > " -Color Cyan -NoNewline
+        $sub = (Read-Host).Trim().ToUpper()
 
-    switch ($sub) {
-        '1' { Invoke-SFC }
-        '2' { Invoke-DISM }
-        '3' { Invoke-Chkdsk }
-        '4' { Invoke-SFC; Invoke-DISM }
-        '5' { Repair-WindowsStore }
-        '6' { Repair-DotNet }
-        default { return }
-    }
+        switch ($sub) {
+            '1' { Invoke-SFC;              Pause-Submenu }
+            '2' { Invoke-DISM;             Pause-Submenu }
+            '3' { Invoke-Chkdsk;           Pause-Submenu }
+            '4' { Invoke-SFC; Invoke-DISM; Pause-Submenu }
+            '5' { Repair-WindowsStore;     Pause-Submenu }
+            '6' { Repair-DotNet;           Pause-Submenu }
+            'B' { return }
+            default { }
+        }
+    } while ($true)
 }
 
 function Invoke-SFC {

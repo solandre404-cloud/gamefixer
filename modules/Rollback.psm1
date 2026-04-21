@@ -4,24 +4,28 @@
 # ============================================================================
 
 function Invoke-Rollback {
-    Show-Section "ROLLBACK / RESTAURACION"
+    do {
+        Clear-Host
+        Show-Section "ROLLBACK / RESTAURACION"
 
-    Write-UI "  [1] Listar backups disponibles" -Color Yellow
-    Write-UI "  [2] Restaurar ultimo backup de registro" -Color Yellow
-    Write-UI "  [3] Crear punto de restauracion del sistema" -Color Yellow
-    Write-UI "  [4] Abrir System Restore (UI clasica)" -Color Yellow
-    Write-UI "  [B] Volver" -Color Yellow
-    Write-Host ""
-    Write-UI "  > " -Color Cyan -NoNewline
-    $sub = (Read-Host).Trim().ToUpper()
+        Write-UI "  [1] Listar backups disponibles" -Color Yellow
+        Write-UI "  [2] Restaurar ultimo backup de registro" -Color Yellow
+        Write-UI "  [3] Crear punto de restauracion del sistema" -Color Yellow
+        Write-UI "  [4] Abrir System Restore (UI clasica)" -Color Yellow
+        Write-UI "  [B] Volver al menu principal" -Color Yellow
+        Write-Host ""
+        Write-UI "  > " -Color Cyan -NoNewline
+        $sub = (Read-Host).Trim().ToUpper()
 
-    switch ($sub) {
-        '1' { Show-Backups }
-        '2' { Restore-LastBackup }
-        '3' { New-SystemRestorePoint }
-        '4' { Start-Process 'rstrui.exe' }
-        default { return }
-    }
+        switch ($sub) {
+            '1' { Show-Backups;              Pause-Submenu }
+            '2' { Restore-LastBackup;        Pause-Submenu }
+            '3' { New-SystemRestorePoint;    Pause-Submenu }
+            '4' { Start-Process 'rstrui.exe';Pause-Submenu }
+            'B' { return }
+            default { }
+        }
+    } while ($true)
 }
 
 function Show-Backups {

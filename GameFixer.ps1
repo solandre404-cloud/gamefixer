@@ -1,5 +1,5 @@
 ﻿# ============================================================================
-#  GAMEFIXER v2.1 - FamiliaCuba Edition
+#  GAMEFIXER v2.02 - FamiliaCuba Edition
 #  Main entry point
 #  Herramienta profesional de diagnostico, optimizacion y reparacion de Windows
 # ============================================================================
@@ -8,9 +8,9 @@
 
 [CmdletBinding()]
 param(
-    [switch]$Live,       # Desactiva DRY-RUN
-    [switch]$NoBanner,   # Salta la animacion de boot
-    [switch]$NoUpdate,   # Salta el check de updates al arrancar
+    [switch]$Live,
+    [switch]$NoBanner,
+    [switch]$NoUpdate,
     [string]$Profile = 'FamiliaCuba'
 )
 
@@ -44,31 +44,35 @@ if (-not $isAdmin) {
 
 # --- Configuracion global ---------------------------------------------------
 $Global:GF = @{
-    Version         = 'v2.1'
-    Build           = '2604'
-    Profile         = $Profile
-    DryRun          = -not $Live
-    Root            = $PSScriptRoot
-    ModulesDir      = Join-Path $PSScriptRoot 'modules'
-    LogsDir         = Join-Path $PSScriptRoot 'logs'
-    BackupsDir      = Join-Path $PSScriptRoot 'backups'
-    LogFile         = $null
-    StartTime       = Get-Date
-    IsAdmin         = $isAdmin
-    Hostname        = $env:COMPUTERNAME
-    User            = $env:USERNAME
-    GPUVendor       = 'nvidia'
-    UpdateAvailable = $null
+    Version            = 'v2.04'
+    Build              = '2604'
+    Profile            = $Profile
+    DryRun             = -not $Live
+    Root               = $PSScriptRoot
+    ModulesDir         = Join-Path $PSScriptRoot 'modules'
+    PluginsDir         = Join-Path $PSScriptRoot 'plugins'
+    LogsDir            = Join-Path $PSScriptRoot 'logs'
+    BackupsDir         = Join-Path $PSScriptRoot 'backups'
+    ReportsDir         = Join-Path $PSScriptRoot 'reports'
+    BenchmarksDir      = Join-Path $PSScriptRoot 'benchmarks'
+    LogFile            = $null
+    StartTime          = Get-Date
+    IsAdmin            = $isAdmin
+    Hostname           = $env:COMPUTERNAME
+    User               = $env:USERNAME
+    GPUVendor          = 'nvidia'
+    UpdateAvailable    = $null
+    DetectedGames      = @()
+    DetectedLaunchers  = @()
+    Plugins            = @()
 }
 
-# Crear directorios si no existen
-foreach ($dir in @($Global:GF.LogsDir, $Global:GF.BackupsDir)) {
+foreach ($dir in @($Global:GF.LogsDir, $Global:GF.BackupsDir, $Global:GF.ReportsDir, $Global:GF.BenchmarksDir, $Global:GF.PluginsDir)) {
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
 }
 
 $Global:GF.LogFile = Join-Path $Global:GF.LogsDir ("session-{0}.log" -f (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'))
 
-# Forzar encoding UTF-8 en consola
 try {
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     $OutputEncoding           = [System.Text.Encoding]::UTF8
@@ -84,6 +88,12 @@ $moduleOrder = @(
     'Logger.psm1',
     'Telemetry.psm1',
     'Updater.psm1',
+    'Benchmark.psm1',
+    'HtmlReport.psm1',
+    'GameDetector.psm1',
+    'GameTweaks.psm1',
+    'AutoFix.psm1',
+    'PluginLoader.psm1',
     'Diagnostico.psm1',
     'OptimizacionGamer.psm1',
     'GPU.psm1',
@@ -110,17 +120,15 @@ Initialize-Logger
 Write-Log -Level INFO -Message "GameFixer $($Global:GF.Version) iniciado por $($Global:GF.User)@$($Global:GF.Hostname)"
 Write-Log -Level INFO -Message "DryRun: $($Global:GF.DryRun) | Profile: $($Global:GF.Profile)"
 
-# --- Check silencioso de actualizaciones (async-ish) ------------------------
+# Cargar plugins
+try { Initialize-PluginLoader } catch { Write-Log -Level WARN -Message "Plugin loader fallo: $($_.Exception.Message)" }
+
+# Check silencioso de actualizaciones
 if (-not $NoUpdate) {
-    # Lo hacemos en background para no bloquear el arranque
-    try {
-        Invoke-SilentUpdateCheck
-    } catch {
-        Write-Log -Level WARN -Message "Updater silent check fallo: $($_.Exception.Message)"
-    }
+    try { Invoke-SilentUpdateCheck } catch { Write-Log -Level WARN -Message "Updater silent check fallo: $($_.Exception.Message)" }
 }
 
-# --- Animacion de boot ------------------------------------------------------
+# Animacion de boot
 if (-not $NoBanner) {
     Show-BootAnimation
 }
@@ -140,6 +148,11 @@ function Invoke-MenuChoice {
         '8' { Invoke-Rollback }
         '9' { Invoke-Salud }
         'P' { Invoke-Perfiles }
+        'A' { Invoke-AutoFix }
+        'B' { Invoke-BenchmarkMenu }
+        'G' { Invoke-GameDetectorMenu }
+        'T' { Invoke-GameTweaksMenu }
+        'X' { Invoke-PluginsMenu }
         'U' { Invoke-UpdaterMenu }
         'L' { Show-Logs }
         'C' { Show-Config }
@@ -177,9 +190,12 @@ try {
 
         $state = Invoke-MenuChoice -Choice $choice
 
-        if ($choice -match '^[0-9PLCHU]$') {
+        # Solo pausar para acciones que NO tienen su propio submenu con loop.
+        # Los submenus con loop (3,4,5,6,7,8,P,B,T) se encargan de su propio pause.
+        # Acciones de tirada directa: 1,2,9,A,G,X,U,L,C,H,D
+        if ($choice -match '^[129AGXULCH]$') {
             Write-Host ""
-            Write-UI "  Presiona ENTER para volver al menu..." -Color DarkGreen -NoNewline
+            Write-UI "  Presiona ENTER para volver al menu principal..." -Color DarkGreen -NoNewline
             [void](Read-Host)
         }
     } while ($state -ne 'EXIT')
