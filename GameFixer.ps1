@@ -27,7 +27,9 @@ if (-not $isAdmin) {
     Write-Host "  [>] Relanzando con elevacion..." -ForegroundColor Cyan
     Start-Sleep -Seconds 1
 
-    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"")
+    # -NoExit mantiene la ventana elevada abierta si el script crashea
+    # -ExecutionPolicy Bypass ignora restricciones globales del sistema
+    $argList = @('-NoProfile', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"")
     if ($Live)     { $argList += '-Live' }
     if ($NoBanner) { $argList += '-NoBanner' }
     if ($NoUpdate) { $argList += '-NoUpdate' }
@@ -42,9 +44,24 @@ if (-not $isAdmin) {
     exit
 }
 
+# Trap global: si algo crashea durante la carga de modulos, mostrar error y pausar
+$ErrorActionPreference = 'Stop'
+trap {
+    Write-Host ""
+    Write-Host "=== ERROR FATAL ===" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Ubicacion:" -ForegroundColor Yellow
+    Write-Host $_.ScriptStackTrace -ForegroundColor DarkRed
+    Write-Host ""
+    Write-Host "Presiona ENTER para cerrar..." -ForegroundColor Yellow
+    Read-Host
+    exit 1
+}
+
 # --- Configuracion global ---------------------------------------------------
 $Global:GF = @{
-    Version            = 'v2.04'
+    Version            = 'v2.08'
     Build              = '2604'
     Profile            = $Profile
     DryRun             = -not $Live
@@ -88,6 +105,9 @@ $moduleOrder = @(
     'Logger.psm1',
     'Telemetry.psm1',
     'Updater.psm1',
+    'Config.psm1',
+    'Effects.psm1',
+    'Dashboard.psm1',
     'Benchmark.psm1',
     'HtmlReport.psm1',
     'GameDetector.psm1',
@@ -120,17 +140,36 @@ Initialize-Logger
 Write-Log -Level INFO -Message "GameFixer $($Global:GF.Version) iniciado por $($Global:GF.User)@$($Global:GF.Hostname)"
 Write-Log -Level INFO -Message "DryRun: $($Global:GF.DryRun) | Profile: $($Global:GF.Profile)"
 
+# Cargar configuracion persistente
+try { Initialize-Config | Out-Null } catch { Write-Log -Level WARN -Message "Config init fallo: $($_.Exception.Message)" }
+
 # Cargar plugins
 try { Initialize-PluginLoader } catch { Write-Log -Level WARN -Message "Plugin loader fallo: $($_.Exception.Message)" }
 
-# Check silencioso de actualizaciones
-if (-not $NoUpdate) {
-    try { Invoke-SilentUpdateCheck } catch { Write-Log -Level WARN -Message "Updater silent check fallo: $($_.Exception.Message)" }
+# Check forzado de actualizaciones (bloquea hasta que usuario decida)
+if (-not $NoUpdate -and $Global:GF.Config.autoUpdate) {
+    try {
+        $continueStart = Invoke-ForcedUpdateCheck
+        if (-not $continueStart) {
+            # Install-Update hizo exit, no deberiamos llegar aqui, pero por las dudas
+            exit 0
+        }
+    } catch {
+        Write-Log -Level WARN -Message "Updater check fallo: $($_.Exception.Message)"
+        # Si falla el check (sin internet por ejemplo), no bloqueamos arranque
+    }
 }
 
-# Animacion de boot
+# Animacion de boot (configurable: typewriter | matrix | none)
 if (-not $NoBanner) {
-    Show-BootAnimation
+    Play-BootSound
+    $bootStyle = $Global:GF.Config.bootAnimation
+    switch ($bootStyle) {
+        'matrix'     { Show-EpicBoot }
+        'typewriter' { Show-BootAnimation }
+        'none'       { }
+        default      { Show-BootAnimation }
+    }
 }
 
 # --- Loop principal ---------------------------------------------------------
@@ -154,15 +193,36 @@ function Invoke-MenuChoice {
         'T' { Invoke-GameTweaksMenu }
         'X' { Invoke-PluginsMenu }
         'U' { Invoke-UpdaterMenu }
+        'M' { Invoke-DashboardMode }
+        'S' { Invoke-ConfigMenu }
+        'E' { Invoke-ProfileIOMenu }
         'L' { Show-Logs }
-        'C' { Show-Config }
+        'I' { Show-Config }
         'H' { Show-Help }
         'D' {
             $Global:GF.DryRun = -not $Global:GF.DryRun
-            $state = if ($Global:GF.DryRun) { 'ACTIVADO' } else { 'DESACTIVADO' }
-            Write-UI "`n[>] DRY-RUN $state" -Color Yellow
-            Write-Log -Level INFO -Message "DryRun toggled: $($Global:GF.DryRun)"
-            Start-Sleep -Seconds 1
+            Write-Host ""
+            if ($Global:GF.DryRun) {
+                Write-UI "  +--------------------------------------------------------------+" -Color Yellow
+                Write-UI "  |  [!] MODO PRUEBA ACTIVADO (SEGURO)                           |" -Color Yellow
+                Write-UI "  |                                                              |" -Color Yellow
+                Write-UI "  |  Las acciones NO se aplican de verdad, solo se simulan.      |" -Color Yellow
+                Write-UI "  |  Podes ver que haria el script sin riesgo de romper nada.    |" -Color Yellow
+                Write-UI "  |                                                              |" -Color Yellow
+                Write-UI "  |  Pulsa [D] otra vez para ACTIVAR el modo real.               |" -Color Yellow
+                Write-UI "  +--------------------------------------------------------------+" -Color Yellow
+            } else {
+                Write-UI "  +--------------------------------------------------------------+" -Color Red
+                Write-UI "  |  [!] MODO REAL ACTIVADO (CUIDADO)                            |" -Color Red
+                Write-UI "  |                                                              |" -Color Red
+                Write-UI "  |  Las acciones SI se aplicaran al sistema.                    |" -Color Red
+                Write-UI "  |  Se crean backups del registro antes de cada cambio.         |" -Color Red
+                Write-UI "  |                                                              |" -Color Red
+                Write-UI "  |  Pulsa [D] otra vez para volver al MODO PRUEBA.              |" -Color Red
+                Write-UI "  +--------------------------------------------------------------+" -Color Red
+            }
+            Write-Log -Level INFO -Message "ModoPrueba toggled: $($Global:GF.DryRun)"
+            Start-Sleep -Seconds 3
         }
         'Q' { return 'EXIT' }
         '' { }
@@ -191,9 +251,9 @@ try {
         $state = Invoke-MenuChoice -Choice $choice
 
         # Solo pausar para acciones que NO tienen su propio submenu con loop.
-        # Los submenus con loop (3,4,5,6,7,8,P,B,T) se encargan de su propio pause.
-        # Acciones de tirada directa: 1,2,9,A,G,X,U,L,C,H,D
-        if ($choice -match '^[129AGXULCH]$') {
+        # Con submenu/loop propio: 3,4,5,6,7,8,P,B,T,S,E,M
+        # Directas: 1,2,9,A,G,X,U,L,I,H
+        if ($choice -match '^[129AGXULIH]$') {
             Write-Host ""
             Write-UI "  Presiona ENTER para volver al menu principal..." -Color DarkGreen -NoNewline
             [void](Read-Host)

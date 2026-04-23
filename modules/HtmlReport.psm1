@@ -48,7 +48,7 @@ function New-HtmlReport {
     # Info del sistema
     $host = $Global:GF.Hostname
     $user = $Global:GF.User
-    $mode = if ($Pipeline.DryRun) { 'DRY-RUN' } else { 'LIVE' }
+    $mode = if ($Pipeline.DryRun) { 'MODO PRUEBA' } else { 'LIVE' }
     $modeClass = if ($Pipeline.DryRun) { 'dry' } else { 'live' }
     $okCount = ($Pipeline.Steps | Where-Object Status -eq 'OK').Count
     $totalCount = $Pipeline.Steps.Count

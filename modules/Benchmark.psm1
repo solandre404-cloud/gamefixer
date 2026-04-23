@@ -295,7 +295,7 @@ function Invoke-DiskBenchmarkPrompt {
 # ============================================================================
 function Invoke-NetworkBenchmark {
     Write-Host ""
-    Write-UI "[NET] Benchmark en ejecucion (ping + speed test adaptativo)..." -Color Cyan
+    Write-UI "[NET] Benchmark en ejecucion (ping + speed test optimizado para fibra)..." -Color Cyan
 
     # Ping
     $pings = Test-Connection -ComputerName '1.1.1.1' -Count 5 -ErrorAction SilentlyContinue
@@ -306,63 +306,153 @@ function Invoke-NetworkBenchmark {
 
     Write-UI ("       Ping: avg ${avgPing}ms | min ${minPing}ms | max ${maxPing}ms | jitter ${jitter}ms") -Color Green
 
-    # Speed test adaptativo: arranca con 10MB, mide, y si fue <2s hace 100MB, si <2s hace 500MB
-    # Esto funciona para cualquier velocidad (10 Mbps hasta 2 Gbps)
+    # TLS 1.2 obligatorio
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    [Net.ServicePointManager]::DefaultConnectionLimit = 32   # permite paralelismo
+
+    # Resultado inicial
     $downMbps = 0
     $finalSizeMB = 0
     $finalSec = 0
+    $sourceUsed = $null
+    $method = 'none'
 
-    $probeSizes = @(10, 100, 500)  # MB
-    $targetMinSec = 3  # queremos medir al menos 3s para precision
+    # Intento 1: .NET HttpClient a memoria con múltiples conexiones paralelas
+    # Esto es lo que usa fast.com internamente para poder medir 10 Gbps
+    try {
+        Write-UI "       [1/2] Probando descarga paralela (.NET HttpClient, 8 streams)..." -Color DarkGreen
 
-    foreach ($sz in $probeSizes) {
-        $url = "https://speed.cloudflare.com/__down?bytes=$($sz * 1000000)"
-        try {
-            Write-UI ("       Descargando ${sz} MB...") -Color DarkGreen
-            $sw = [System.Diagnostics.Stopwatch]::StartNew()
-            $tmp = [System.IO.Path]::GetTempFileName()
-            Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing -TimeoutSec 60
-            $sw.Stop()
-            $realSizeMB = (Get-Item $tmp).Length / 1MB
-            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        Add-Type -AssemblyName 'System.Net.Http' -ErrorAction SilentlyContinue
 
-            $elapsedSec = $sw.Elapsed.TotalSeconds
-            $mbps = [math]::Round($realSizeMB * 8 / $elapsedSec, 1)
+        $handler = New-Object System.Net.Http.HttpClientHandler
+        $handler.AutomaticDecompression = [System.Net.DecompressionMethods]::None
+        $client = New-Object System.Net.Http.HttpClient($handler)
+        $client.Timeout = [TimeSpan]::FromSeconds(45)
+        $client.DefaultRequestHeaders.UserAgent.ParseAdd('Mozilla/5.0 GameFixer/2.07')
 
-            Write-UI ("         -> $mbps Mbps en ${elapsedSec:N1}s") -Color DarkGreen
+        # Cloudflare: 500 MB en chunks paralelos
+        $targetMB = 500
+        $numStreams = 8
+        $mbPerStream = [int]($targetMB / $numStreams)
 
-            # Si el test duro menos de 3s y hay probe mas grande, continuar
-            $downMbps = $mbps
-            $finalSizeMB = [int]$realSizeMB
+        $tasks = @()
+        $swAll = [System.Diagnostics.Stopwatch]::StartNew()
+
+        for ($i = 0; $i -lt $numStreams; $i++) {
+            $url = "https://speed.cloudflare.com/__down?bytes=$($mbPerStream * 1000000)"
+            $task = $client.GetByteArrayAsync($url)
+            $tasks += $task
+        }
+
+        # Esperar todas con timeout total de 20s
+        $allDone = [System.Threading.Tasks.Task]::WaitAll($tasks, 20000)
+        $swAll.Stop()
+
+        if ($allDone) {
+            $totalBytes = 0
+            foreach ($t in $tasks) {
+                if ($t.IsCompletedSuccessfully) {
+                    $totalBytes += $t.Result.Length
+                }
+            }
+            $realMB = $totalBytes / 1MB
+            $elapsedSec = $swAll.Elapsed.TotalSeconds
+            if ($elapsedSec -lt 0.1) { $elapsedSec = 0.1 }
+            $downMbps = [math]::Round($realMB * 8 / $elapsedSec, 1)
+
+            Write-UI ("         -> {0:N0} MB en {1:N1}s = {2:N1} Mbps (paralelo x8)" -f $realMB, $elapsedSec, $downMbps) -Color Green
+
+            $finalSizeMB = [int]$realMB
             $finalSec = [math]::Round($elapsedSec, 1)
+            $sourceUsed = 'Cloudflare-parallel'
+            $method = 'httpclient-parallel'
 
-            if ($elapsedSec -ge $targetMinSec) {
-                # Ya tenemos una medicion decente, parar
-                break
+            # Limpieza
+            foreach ($t in $tasks) { $t.Dispose() }
+        } else {
+            Write-UI "         [!] Timeout en descarga paralela" -Color DarkYellow
+        }
+
+        $client.Dispose()
+        $handler.Dispose()
+    } catch {
+        $errMsg = $_.Exception.Message
+        if ($errMsg.Length -gt 80) { $errMsg = $errMsg.Substring(0, 80) }
+        Write-UI ("         [!] HttpClient fallo: " + $errMsg) -Color DarkYellow
+    }
+
+    # Intento 2 (fallback): si el paralelo no funcionó o dio muy bajo, intentar con Invoke-WebRequest secuencial
+    # pero con tamaño grande (500MB) para que tarde lo suficiente y se mida bien
+    if ($downMbps -lt 10 -or $method -eq 'none') {
+        Write-UI "       [2/2] Probando descarga secuencial (fallback)..." -Color DarkGreen
+
+        $sources = @(
+            @{ Name='Hetzner 1GB';  Url='https://ash-speed.hetzner.com/1GB.bin' },
+            @{ Name='Cloudflare 500MB'; Url='https://speed.cloudflare.com/__down?bytes=500000000' },
+            @{ Name='OVH 1GB';      Url='http://proof.ovh.net/files/1Gb.dat' }
+        )
+
+        foreach ($src in $sources) {
+            try {
+                Write-UI ("         Intentando $($src.Name)...") -Color DarkGray
+                $tmp = [System.IO.Path]::GetTempFileName()
+                $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+                $wc = New-Object System.Net.WebClient
+                $wc.Headers.Add('User-Agent','Mozilla/5.0 GameFixer/2.07')
+                $wc.DownloadFile($src.Url, $tmp)
+                $sw.Stop()
+
+                $realMB = (Get-Item $tmp).Length / 1MB
+                Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+                $wc.Dispose()
+
+                $elapsed = $sw.Elapsed.TotalSeconds
+                if ($elapsed -lt 0.1) { $elapsed = 0.1 }
+                $mbps = [math]::Round($realMB * 8 / $elapsed, 1)
+
+                Write-UI ("         -> {0:N0} MB en {1:N1}s = {2:N1} Mbps desde $($src.Name)" -f $realMB, $elapsed, $mbps) -Color Green
+
+                # Solo actualizamos si es mayor que lo que teniamos
+                if ($mbps -gt $downMbps) {
+                    $downMbps = $mbps
+                    $finalSizeMB = [int]$realMB
+                    $finalSec = [math]::Round($elapsed, 1)
+                    $sourceUsed = $src.Name
+                    $method = 'webclient'
+                }
+                break  # primera que funciona, nos vale
+            } catch {
+                $em = $_.Exception.Message
+                if ($em.Length -gt 60) { $em = $em.Substring(0, 60) }
+                Write-UI ("         [!] $($src.Name) fallo: $em") -Color DarkYellow
+                if (Test-Path $tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
             }
-            if ($sz -eq $probeSizes[-1]) {
-                # Era el ultimo probe, terminar
-                break
-            }
-            # Conexion rapida, seguir con siguiente probe
-        } catch {
-            Write-UI ("       [!] Fallo probe ${sz}MB: " + $_.Exception.Message) -Color Yellow
-            break
         }
     }
 
-    # Calidad de la conexion para gaming
+    # Diagnóstico si la velocidad sigue siendo baja (menor a 100 Mbps cuando el usuario espera gigabit)
+    if ($downMbps -gt 0 -and $downMbps -lt 100) {
+        Write-Host ""
+        Write-UI "       [i] Velocidad menor de 100 Mbps detectada. Causas posibles:" -Color Yellow
+        Write-UI "           - Servidor del test con rate-limit (prueba el metodo paralelo)" -Color DarkGray
+        Write-UI "           - WiFi en vez de cable (medi con cable ethernet si es posible)" -Color DarkGray
+        Write-UI "           - Antivirus/firewall inspeccionando el trafico" -Color DarkGray
+        Write-UI "           - Saturacion momentanea de la red" -Color DarkGray
+    }
+
+    # Calidad de la conexion para gaming (umbrales ajustados)
     $gamingQuality = 'Pobre'
-    if ($avgPing -gt 0 -and $avgPing -le 30 -and $jitter -le 10 -and $downMbps -ge 25) {
+    if ($avgPing -gt 0 -and $avgPing -le 30 -and $jitter -le 10 -and $downMbps -ge 100) {
         $gamingQuality = 'Excelente'
-    } elseif ($avgPing -gt 0 -and $avgPing -le 60 -and $jitter -le 20 -and $downMbps -ge 10) {
-        $gamingQuality = 'Buena'
-    } elseif ($avgPing -gt 0 -and $avgPing -le 100 -and $downMbps -ge 5) {
+    } elseif ($avgPing -gt 0 -and $avgPing -le 50 -and $jitter -le 15 -and $downMbps -ge 50) {
+        $gamingQuality = 'Muy buena'
+    } elseif ($avgPing -gt 0 -and $avgPing -le 80 -and $jitter -le 25 -and $downMbps -ge 25) {
         $gamingQuality = 'Aceptable'
     }
 
     Write-UI ("       Calidad para gaming: $gamingQuality") -Color Green
-    Write-Log -Level INFO -Message "Bench Net: ping=${avgPing}ms jitter=${jitter}ms down=${downMbps}Mbps quality=$gamingQuality"
+    Write-Log -Level INFO -Message "Bench Net: ping=${avgPing}ms jitter=${jitter}ms down=${downMbps}Mbps quality=$gamingQuality method=$method source=$sourceUsed"
 
     return [pscustomobject]@{
         Type          = 'Network'
@@ -374,6 +464,8 @@ function Invoke-NetworkBenchmark {
         DownMbps      = $downMbps
         TestSizeMB    = $finalSizeMB
         TestDurationS = $finalSec
+        SourceUsed    = $sourceUsed
+        Method        = $method
         GamingQuality = $gamingQuality
         Summary       = "Ping ${avgPing}ms (jitter ${jitter}ms) | Down ${downMbps}Mbps | $gamingQuality"
     }

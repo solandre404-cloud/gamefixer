@@ -52,8 +52,8 @@ function Invoke-LoggedAction {
     Write-UI ("    -> " + $Description) -Color Green
 
     if ($Global:GF.DryRun -and -not $AlwaysRun) {
-        Write-UI "       [DRY-RUN] accion simulada" -Color DarkYellow
-        Write-Log -Level INFO -Message "DRY-RUN: $Description (no ejecutado)"
+        Write-UI "       [PRUEBA] accion simulada" -Color DarkYellow
+        Write-Log -Level INFO -Message "MODO PRUEBA: $Description (no ejecutado)"
         return $null
     }
 

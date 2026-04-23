@@ -1,7 +1,128 @@
 ﻿# ============================================================================
 #  modules/UI.psm1
-#  Helpers de interfaz: colores, banner, paneles, animaciones
+#  Helpers de interfaz: colores, banner, paneles, animaciones, temas
 # ============================================================================
+
+# ----------------------------------------------------------------------------
+#  SISTEMA DE TEMAS
+#  Cada tema mapea "roles semanticos" a ConsoleColor reales.
+#  Roles: Primary, Secondary, Accent, Warning, Danger, Dim, Highlight, Label
+# ----------------------------------------------------------------------------
+
+$Script:Themes = @{
+    matrix = @{
+        Primary   = 'Green'         # texto principal, valores OK
+        Secondary = 'DarkGreen'     # separadores, bordes atenuados
+        Accent    = 'Yellow'        # teclas del menu [1][2][3]
+        Warning   = 'Yellow'
+        Danger    = 'Red'
+        Dim       = 'DarkGray'      # texto muy apagado
+        Highlight = 'Cyan'          # titulos de seccion
+        Label     = 'Cyan'          # labels CPU/GPU/RAM
+        BadgeBg   = 'DarkYellow'
+        BadgeFg   = 'Black'
+    }
+    cyberpunk = @{
+        Primary   = 'Magenta'
+        Secondary = 'DarkMagenta'
+        Accent    = 'Yellow'
+        Warning   = 'Yellow'
+        Danger    = 'Red'
+        Dim       = 'DarkGray'
+        Highlight = 'Cyan'
+        Label     = 'Cyan'
+        BadgeBg   = 'DarkMagenta'
+        BadgeFg   = 'White'
+    }
+    fallout = @{
+        Primary   = 'DarkYellow'    # ambar clasico Pip-Boy
+        Secondary = 'DarkGray'
+        Accent    = 'Yellow'
+        Warning   = 'Yellow'
+        Danger    = 'Red'
+        Dim       = 'DarkGray'
+        Highlight = 'DarkYellow'
+        Label     = 'Yellow'
+        BadgeBg   = 'DarkYellow'
+        BadgeFg   = 'Black'
+    }
+    dracula = @{
+        Primary   = 'Magenta'       # violeta
+        Secondary = 'DarkMagenta'
+        Accent    = 'Green'         # verde menta para acentos
+        Warning   = 'Yellow'
+        Danger    = 'Red'
+        Dim       = 'DarkGray'
+        Highlight = 'Cyan'          # rosa/cyan para titulos
+        Label     = 'Cyan'
+        BadgeBg   = 'DarkMagenta'
+        BadgeFg   = 'White'
+    }
+}
+
+function Get-ThemeColor {
+    <#
+    .SYNOPSIS
+    Devuelve el ConsoleColor real de un rol semantico en el tema actual.
+    Si no hay tema cargado o el rol no existe, devuelve un default sensato.
+    #>
+    param(
+        [string]$Role = 'Primary',
+        [ConsoleColor]$Default = 'Green'
+    )
+
+    $themeName = 'matrix'
+    if ($Global:GF -and $Global:GF.Config -and $Global:GF.Config.theme) {
+        $themeName = $Global:GF.Config.theme
+    }
+
+    $theme = $Script:Themes[$themeName]
+    if (-not $theme) { $theme = $Script:Themes['matrix'] }
+
+    if ($theme.ContainsKey($Role)) {
+        return [ConsoleColor]$theme[$Role]
+    }
+    return $Default
+}
+
+function ConvertTo-ThemeColor {
+    <#
+    .SYNOPSIS
+    Traduce un ConsoleColor "matrix-default" al equivalente en el tema activo.
+    Asi el codigo viejo que pasa -Color Green automaticamente se adapta.
+    #>
+    param([ConsoleColor]$Color)
+
+    $themeName = 'matrix'
+    if ($Global:GF -and $Global:GF.Config -and $Global:GF.Config.theme) {
+        $themeName = $Global:GF.Config.theme
+    }
+
+    # Si el tema es matrix, pasamos directo (comportamiento original)
+    if ($themeName -eq 'matrix' -or -not $Script:Themes[$themeName]) {
+        return $Color
+    }
+
+    # Mapeo: el color original matrix -> rol -> color del tema activo
+    $map = @{
+        'Green'      = 'Primary'
+        'DarkGreen'  = 'Secondary'
+        'Yellow'     = 'Accent'
+        'DarkYellow' = 'Warning'
+        'Red'        = 'Danger'
+        'DarkRed'    = 'Danger'
+        'Cyan'       = 'Highlight'
+        'DarkCyan'   = 'Label'
+        'DarkGray'   = 'Dim'
+        'Gray'       = 'Dim'
+    }
+
+    $role = $map[$Color.ToString()]
+    if ($role) {
+        return (Get-ThemeColor -Role $role -Default $Color)
+    }
+    return $Color
+}
 
 function Write-UI {
     param(
@@ -11,8 +132,9 @@ function Write-UI {
         [ConsoleColor]$Color = 'Green',
         [switch]$NoNewline
     )
+    $themedColor = ConvertTo-ThemeColor -Color $Color
     $prev = [Console]::ForegroundColor
-    [Console]::ForegroundColor = $Color
+    [Console]::ForegroundColor = $themedColor
     if ($NoNewline) { [Console]::Write($Text) } else { [Console]::WriteLine($Text) }
     [Console]::ForegroundColor = $prev
 }
@@ -99,9 +221,9 @@ function Show-StatusLine {
     Write-UI $line -Color DarkGreen -NoNewline
     Write-UI "    " -NoNewline
     if ($Global:GF.DryRun) {
-        Write-Badge -Text ' * DRY-RUN ACTIVE ' -Bg DarkYellow -Fg Black
+        Write-Badge -Text ' MODO PRUEBA - SIMULA ' -Bg DarkYellow -Fg Black
     } else {
-        Write-Badge -Text ' * LIVE MODE ' -Bg DarkRed -Fg White
+        Write-Badge -Text ' MODO REAL - APLICA CAMBIOS ' -Bg DarkRed -Fg White
     }
     Write-Host ""
     Write-UI ('-' * 76) -Color DarkGreen
@@ -246,16 +368,16 @@ function Show-MainMenu {
     Write-Host ""
 
     $items = @(
-        @{ Key='1'; Text='Diagnostico';        Desc='analisis completo del sistema' },
-        @{ Key='2'; Text='Optimizacion Gamer'; Desc='plan power, servicios, tweaks' },
-        @{ Key='3'; Text='GPU';                Desc='driver, shader cache, NVIDIA' },
-        @{ Key='4'; Text='Red';                Desc='DNS, flush, latencia' },
-        @{ Key='5'; Text='Reparacion';         Desc='archivos sistema (SFC/DISM)' },
-        @{ Key='6'; Text='Limpieza';           Desc='temp, cache, logs, papelera' },
-        @{ Key='7'; Text='Soluciones Comunes'; Desc='fixes tipicos de gaming' },
-        @{ Key='8'; Text='Rollback';           Desc='revertir ultimo cambio' },
-        @{ Key='9'; Text='Salud';              Desc='SMART, chkdsk, event log' },
-        @{ Key='P'; Text='Perfiles';           Desc='gamer, oficina, ahorro' }
+        @{ Key='1'; Text='Diagnostico';        Desc='analisis completo del PC' },
+        @{ Key='2'; Text='Optimizar Gaming';   Desc='tweaks para maximo FPS' },
+        @{ Key='3'; Text='GPU/Graficos';       Desc='drivers NVIDIA, shader cache' },
+        @{ Key='4'; Text='Red/Internet';       Desc='DNS, latencia, velocidad' },
+        @{ Key='5'; Text='Reparar Windows';    Desc='archivos de sistema (SFC/DISM)' },
+        @{ Key='6'; Text='Limpieza';           Desc='temp, cache, papelera' },
+        @{ Key='7'; Text='Arreglar Juegos';    Desc='fixes comunes de juegos' },
+        @{ Key='8'; Text='Seguridad/Backup';   Desc='respaldos, restaurar, TPM' },
+        @{ Key='9'; Text='Salud del PC';       Desc='discos, errores, temperaturas' },
+        @{ Key='P'; Text='Perfiles Windows';   Desc='energia: gamer/oficina/ahorro' }
     )
 
     $half = [math]::Ceiling($items.Count / 2)
@@ -294,20 +416,23 @@ function Show-MainMenu {
     Write-Host ""
 
     # Segunda fila de opciones avanzadas
-    Write-UI "  NUEVO EN v2.02:" -Color Cyan
+    Write-UI "  FEATURES AVANZADAS:" -Color Cyan
     Write-UI "  [B] " -Color Yellow -NoNewline
-    Write-UI "Benchmarks " -Color Green -NoNewline
-    Write-UI ("(CPU/RAM/Disk/Red) ") -Color DarkGray -NoNewline
+    Write-UI "Benchmarks          " -Color Green -NoNewline
     Write-UI "  [G] " -Color Yellow -NoNewline
-    Write-UI "Detectar Juegos " -Color Green -NoNewline
-    Write-UI "(Steam, Epic...)" -Color DarkGray
-
+    Write-UI "Detectar Juegos     " -Color Green -NoNewline
     Write-UI "  [T] " -Color Yellow -NoNewline
-    Write-UI "Tweaks por Juego " -Color Green -NoNewline
-    Write-UI ("(CS2, Valo, LoL)   ") -Color DarkGray -NoNewline
-    Write-UI "  [X] " -Color Yellow -NoNewline
-    Write-UI "Plugins " -Color Green -NoNewline
-    Write-UI "(extensiones custom)" -Color DarkGray
+    Write-UI "Ajustes por Juego" -Color Green
+
+    Write-UI "  [M] " -Color Yellow -NoNewline
+    Write-UI "Monitor en Vivo (htop)  " -Color Green -NoNewline
+    Write-UI " [X] " -Color Yellow -NoNewline
+    Write-UI "Plugins" -Color Green
+
+    Write-UI "  [S] " -Color Yellow -NoNewline
+    Write-UI "Preferencias           " -Color Green -NoNewline
+    Write-UI " [E] " -Color Yellow -NoNewline
+    Write-UI "Guardar/Cargar perfiles" -Color Green
     Write-Host ""
 }
 
@@ -336,12 +461,12 @@ function Show-Footer {
     Write-UI " update  " -Color DarkGreen -NoNewline
     Write-UI "[L]" -Color Yellow -NoNewline
     Write-UI " logs  " -Color DarkGreen -NoNewline
-    Write-UI "[C]" -Color Yellow -NoNewline
-    Write-UI " config  " -Color DarkGreen -NoNewline
+    Write-UI "[I]" -Color Yellow -NoNewline
+    Write-UI " info  " -Color DarkGreen -NoNewline
     Write-UI "[H]" -Color Yellow -NoNewline
     Write-UI " help  " -Color DarkGreen -NoNewline
     Write-UI "[D]" -Color Yellow -NoNewline
-    Write-UI " dry-run  " -Color DarkGreen -NoNewline
+    Write-UI " modo prueba  " -Color DarkGreen -NoNewline
     Write-UI "[Q]" -Color Yellow -NoNewline
     Write-UI " salir" -Color DarkGreen
     Write-Host ""
@@ -367,7 +492,7 @@ function Show-Section {
 function Confirm-Action {
     param([string]$Message)
     if ($Global:GF.DryRun) {
-        Write-UI "    [DRY-RUN] Se saltaria: $Message" -Color DarkYellow
+        Write-UI "    [PRUEBA] Se saltaria: $Message" -Color DarkYellow
         return $false
     }
     Write-UI "    [?] $Message (s/N): " -Color Yellow -NoNewline
@@ -412,8 +537,8 @@ function Show-Help {
     Write-UI "  GAMEFIXER es una herramienta de diagnostico, optimizacion y reparacion"  -Color Green
     Write-UI "  de Windows orientada a gaming. Cada opcion ejecuta un flujo especifico." -Color Green
     Write-Host ""
-    Write-UI "  DRY-RUN:" -Color Yellow
-    Write-UI "    Por defecto el script corre en modo DRY-RUN: muestra lo que HARIA"     -Color Green
+    Write-UI "  MODO PRUEBA:" -Color Yellow
+    Write-UI "    Por defecto el script corre en modo MODO PRUEBA: muestra lo que HARIA"     -Color Green
     Write-UI "    sin aplicar cambios. Usa [D] para desactivarlo o lanza con -Live."     -Color Green
     Write-Host ""
     Write-UI "  LOGS:" -Color Yellow
@@ -424,7 +549,7 @@ function Show-Help {
     Write-UI "    que puedes restaurar desde [8] Rollback."                              -Color Green
     Write-Host ""
     Write-UI "  OPCIONES DE LANZAMIENTO:" -Color Yellow
-    Write-UI "    -Live               Ejecuta cambios reales (no DRY-RUN)"               -Color Green
+    Write-UI "    -Live               Ejecuta cambios reales (no MODO PRUEBA)"               -Color Green
     Write-UI "    -NoBanner           Salta la animacion de boot"                        -Color Green
     Write-UI "    -Profile <nombre>   Carga un perfil especifico"                        -Color Green
 }
@@ -432,4 +557,5 @@ function Show-Help {
 Export-ModuleMember -Function Write-UI, Write-Badge, Write-TypeLine, Write-BarAt, `
     Write-LabelAt, Show-BootAnimation, Show-Banner, Show-TopBar, Show-StatusLine, `
     Show-TelemetryPanels, Show-UpdateBanner, Show-MainMenu, Show-Footer, `
-    Show-Section, Show-Logs, Show-Config, Show-Help, Confirm-Action, Pause-Submenu
+    Show-Section, Show-Logs, Show-Config, Show-Help, Confirm-Action, Pause-Submenu, `
+    Get-ThemeColor, ConvertTo-ThemeColor

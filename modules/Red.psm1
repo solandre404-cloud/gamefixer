@@ -117,12 +117,14 @@ function Reset-DNS {
 
 function Test-Speed {
     Write-Host ""
-    Write-UI "Test de velocidad (100 MB desde Cloudflare + upload 10 MB)..." -Color Cyan
-    Write-UI "  Esto puede tardar 30-60 segundos segun tu conexion." -Color DarkGray
+    Write-UI "Test de velocidad (download + jitter, optimizado para fibra)..." -Color Cyan
+    Write-UI "  El test se adapta a tu conexion: mas rapida = mas datos." -Color DarkGray
     Write-Host ""
 
     # Ping + jitter
     $pings = Test-Connection -ComputerName '1.1.1.1' -Count 5 -ErrorAction SilentlyContinue
+    $avg = 999
+    $jitter = 0
     if ($pings) {
         $avg = [int]($pings | Measure-Object ResponseTime -Average).Average
         $times = $pings | Select-Object -ExpandProperty ResponseTime
@@ -133,56 +135,162 @@ function Test-Speed {
         Write-UI ("  Ping Cloudflare : {0} ms  (jitter {1} ms)" -f $avg, $jitter) -Color Green
     }
 
-    # Download 100 MB
-    try {
-        $url = 'https://speed.cloudflare.com/__down?bytes=100000000'
-        $tmp = [System.IO.Path]::GetTempFileName()
-        $client = New-Object System.Net.WebClient
-        $client.Headers.Add("User-Agent", "GameFixer/2.03")
-        $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        $client.DownloadFile($url, $tmp)
-        $sw.Stop()
-        $sizeMB = (Get-Item $tmp).Length / 1MB
-        $speed = $sizeMB * 8 / ($sw.Elapsed.TotalSeconds)
-        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-        $client.Dispose()
-        Write-UI ("  Descarga        : {0:N1} MB en {1:N1}s = {2:N1} Mbps" -f $sizeMB, $sw.Elapsed.TotalSeconds, $speed) -Color Green
-        Write-Log -Level INFO -Message "Speed test: down $speed Mbps"
+    # Setup .NET para high throughput
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    [Net.ServicePointManager]::DefaultConnectionLimit = 100
+    [Net.ServicePointManager]::Expect100Continue = $false
+    $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 GameFixer/2.07'
 
-        # Upload
-        $uploadBytes = [byte[]]::new(10 * 1MB)
-        (New-Object Random).NextBytes($uploadBytes)
-        $req = [System.Net.HttpWebRequest]::Create('https://speed.cloudflare.com/__up')
-        $req.Method = 'POST'
-        $req.ContentType = 'application/octet-stream'
-        $req.ContentLength = $uploadBytes.Length
-        $req.UserAgent = 'GameFixer/2.03'
-        $req.Timeout = 30000
+    # Fuentes en orden de preferencia.
+    # Para fibra >= 1 Gbps, Cloudflare soporta __down?bytes= hasta varios GB.
+    $sources = @(
+        @{ Name='Cloudflare 1GB';   Url='https://speed.cloudflare.com/__down?bytes=1073741824'; ExpectedMB=1024 }
+        @{ Name='Cloudflare 500MB'; Url='https://speed.cloudflare.com/__down?bytes=524288000';  ExpectedMB=500  }
+        @{ Name='Hetzner 1GB';      Url='https://ash-speed.hetzner.com/1GB.bin';                ExpectedMB=1024 }
+        @{ Name='OVH 1GB';          Url='http://proof.ovh.net/files/1Gb.dat';                   ExpectedMB=125  }  # 1Gb=1Gbit = 125MB
+        @{ Name='Cloudflare 100MB'; Url='https://speed.cloudflare.com/__down?bytes=104857600';  ExpectedMB=100  }
+    )
 
-        $sw2 = [System.Diagnostics.Stopwatch]::StartNew()
-        $reqStream = $req.GetRequestStream()
-        $reqStream.Write($uploadBytes, 0, $uploadBytes.Length)
-        $reqStream.Close()
-        $resp = $req.GetResponse()
-        $sw2.Stop()
-        $resp.Close()
+    $bestMbps = 0
+    $sourceUsed = $null
+    $bytesDownloaded = 0
+    $elapsedTotal = 0
 
-        $upMB = $uploadBytes.Length / 1MB
-        $upSpeed = $upMB * 8 / $sw2.Elapsed.TotalSeconds
-        Write-UI ("  Subida          : {0:N1} MB en {1:N1}s = {2:N1} Mbps" -f $upMB, $sw2.Elapsed.TotalSeconds, $upSpeed) -Color Green
+    foreach ($src in $sources) {
+        try {
+            Write-UI ("  Probando $($src.Name)...") -Color DarkGreen
 
-        # Gaming rating
-        Write-Host ""
-        $tier = 'UNKNOWN'; $col = 'DarkGray'
-        if ($avg -lt 20 -and $speed -ge 100)      { $tier = 'EXCELENTE - listo para juegos competitivos';  $col = 'Green' }
-        elseif ($avg -lt 40 -and $speed -ge 50)   { $tier = 'BUENO - online casual y coop';                  $col = 'Green' }
-        elseif ($avg -lt 80 -and $speed -ge 25)   { $tier = 'ACEPTABLE - notable lag en FPS rapidos';        $col = 'Yellow' }
-        else                                       { $tier = 'MALO - revisa tu red (cable > wifi)';           $col = 'Red' }
-        Write-UI ("  Rating gaming   : " + $tier) -Color $col
-    } catch {
-        Write-UI ("  [!] " + $_.Exception.Message) -Color Red
+            # Usamos HttpWebRequest + stream para medir en tiempo real
+            $req = [System.Net.HttpWebRequest]::Create($src.Url)
+            $req.UserAgent = $userAgent
+            $req.Timeout = 30000
+            $req.ReadWriteTimeout = 30000
+            $req.AllowAutoRedirect = $true
+
+            $response = $req.GetResponse()
+            $stream = $response.GetResponseStream()
+
+            # Buffer grande para minimizar overhead (1 MB chunks)
+            $buffer = New-Object byte[] (1MB)
+            $totalBytes = 0
+            $samples = @()  # ventana deslizante (timestamp, bytesAtTime)
+
+            $startTime = [System.Diagnostics.Stopwatch]::StartNew()
+            $lastReport = 0
+
+            # Leer hasta tener una medicion estable (5-10 segundos) o hasta terminar
+            $maxDurationMs = 10000   # max 10s por fuente
+            $minDurationMs = 3000    # min 3s para medir bien
+
+            while ($true) {
+                $read = $stream.Read($buffer, 0, $buffer.Length)
+                if ($read -le 0) { break }
+                $totalBytes += $read
+
+                # Sample cada 100ms
+                $nowMs = $startTime.ElapsedMilliseconds
+                if (($nowMs - $lastReport) -ge 100) {
+                    $samples += @{ Ms = $nowMs; Bytes = $totalBytes }
+                    $lastReport = $nowMs
+
+                    # Mostrar progreso cada 500ms
+                    if ($samples.Count % 5 -eq 0) {
+                        $currentMbps = if ($nowMs -gt 0) {
+                            [math]::Round(($totalBytes * 8) / 1MB / ($nowMs / 1000), 1)
+                        } else { 0 }
+                        $mbDone = [math]::Round($totalBytes / 1MB, 1)
+                        Write-Host -NoNewline ("`r    Descargado {0,7:N1} MB en {1,5:N1}s -> {2,6:N1} Mbps " -f $mbDone, ($nowMs/1000), $currentMbps) -ForegroundColor Green
+                    }
+                }
+
+                # Si ya pasamos el max, cortar
+                if ($nowMs -ge $maxDurationMs) { break }
+            }
+
+            $stream.Close()
+            $response.Close()
+            $startTime.Stop()
+            Write-Host ""
+
+            $elapsedSec = $startTime.Elapsed.TotalSeconds
+            if ($elapsedSec -le 0) { $elapsedSec = 0.001 }
+
+            # Calcular velocidad usando ventana deslizante: ultimos 3 segundos.
+            # Esto descarta el slow-start de TCP y la latencia inicial.
+            $finalMbps = 0
+            if ($samples.Count -ge 10 -and $elapsedSec -ge 2) {
+                # Buscar una muestra de ~3 segundos antes del fin
+                $endSample = $samples[-1]
+                $targetMs = $endSample.Ms - 3000
+                $startSample = $samples | Where-Object { $_.Ms -ge $targetMs } | Select-Object -First 1
+                if (-not $startSample) { $startSample = $samples[0] }
+
+                $deltaMs = $endSample.Ms - $startSample.Ms
+                $deltaBytes = $endSample.Bytes - $startSample.Bytes
+                if ($deltaMs -gt 0) {
+                    $finalMbps = [math]::Round(($deltaBytes * 8) / 1MB / ($deltaMs / 1000), 1)
+                }
+            } else {
+                # Fallback: promedio simple
+                $finalMbps = [math]::Round(($totalBytes * 8) / 1MB / $elapsedSec, 1)
+            }
+
+            $mbTotal = [math]::Round($totalBytes / 1MB, 1)
+            Write-UI ("    Resultado: {0:N1} MB en {1:N1}s -> {2:N1} Mbps (ventana deslizante)" -f $mbTotal, $elapsedSec, $finalMbps) -Color Green
+
+            if ($finalMbps -gt $bestMbps) {
+                $bestMbps = $finalMbps
+                $sourceUsed = $src.Name
+                $bytesDownloaded = $totalBytes
+                $elapsedTotal = $elapsedSec
+            }
+
+            # Si ya alcanzamos velocidad alta o el test duro suficiente, cortar
+            if ($elapsedSec -ge 5 -and $finalMbps -gt 100) {
+                break  # medicion ya confiable
+            }
+
+        } catch {
+            $err = $_.Exception.Message
+            if ($err.Length -gt 80) { $err = $err.Substring(0, 80) + '...' }
+            Write-UI ("`r    [!] $($src.Name) fallo: $err                                    ") -Color DarkYellow
+            continue
+        }
     }
+
+    if ($bestMbps -eq 0) {
+        Write-UI "  [X] No se pudo medir velocidad desde ninguna fuente." -Color Red
+        return
+    }
+
+    # Conversion a unidades faciles de entender
+    $mbps = $bestMbps
+    $mbpsReal = [math]::Round($mbps / 8, 1)   # MegaBytes/s (velocidad real de descarga)
+    $gbps = [math]::Round($mbps / 1000, 2)
+
+    Write-Host ""
+    Write-UI "  === RESULTADO FINAL ===" -Color Cyan
+    if ($gbps -ge 1) {
+        Write-UI ("  Velocidad: {0} Mbps ({1} Gbps / {2} MB/s)" -f $mbps, $gbps, $mbpsReal) -Color Green
+    } else {
+        Write-UI ("  Velocidad: {0} Mbps ({1} MB/s de descarga real)" -f $mbps, $mbpsReal) -Color Green
+    }
+    Write-UI ("  Fuente usada: $sourceUsed") -Color DarkGray
+    Write-UI ("  Datos transferidos: {0:N1} MB en {1:N1}s" -f ($bytesDownloaded/1MB), $elapsedTotal) -Color DarkGray
+
+    # Gaming rating actualizado
+    Write-Host ""
+    $tier = 'UNKNOWN'; $col = 'DarkGray'
+    if ($avg -lt 20 -and $mbps -ge 300)        { $tier = 'EXCELENTE - fibra para competitivo'; $col = 'Green' }
+    elseif ($avg -lt 30 -and $mbps -ge 100)    { $tier = 'MUY BUENO - juegos online sin problema'; $col = 'Green' }
+    elseif ($avg -lt 50 -and $mbps -ge 50)     { $tier = 'BUENO - casual y coop'; $col = 'Green' }
+    elseif ($avg -lt 80 -and $mbps -ge 25)     { $tier = 'ACEPTABLE - puede haber lag en FPS rapidos'; $col = 'Yellow' }
+    else                                        { $tier = 'MEJORABLE - revisa tu red (cable > wifi)'; $col = 'Red' }
+    Write-UI ("  Rating gaming: $tier") -Color $col
+
+    Write-Log -Level INFO -Message "Speed test: $mbps Mbps from $sourceUsed (${bytesDownloaded}B in ${elapsedTotal}s)"
 }
+
 
 function Show-Connections {
     Write-Host ""

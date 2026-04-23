@@ -2,13 +2,30 @@
 logs/
 *.log
 
-# Backups del registro generados
+# Backups del registro
 backups/
 *.reg
+
+# Reportes generados por AutoFix
+reports/
+
+# Historial de benchmarks locales
+benchmarks/
 
 # Archivos temporales de Windows
 Thumbs.db
 desktop.ini
 
-# VS Code
+# Editores
 .vscode/
+.idea/
+
+# Resultados de tests
+test-results.xml
+coverage.xml
+tests/coverage.xml
+
+# Binarios y temporales
+*.tmp
+*.bak
+*.cache

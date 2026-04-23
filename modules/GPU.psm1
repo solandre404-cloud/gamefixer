@@ -120,13 +120,86 @@ function Set-GPUMaxPerformance {
 
 function Test-GPUDriverVersion {
     Write-Host ""
-    Write-UI "Version de driver instalado:" -Color Cyan
+    Write-UI "Verificando driver NVIDIA..." -Color Cyan
+
+    # Detectar driver instalado
+    $installed = $null
     try {
-        $v = & nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>$null
-        Write-UI ("  $v") -Color Green
-        Write-UI "  Visita https://www.nvidia.com/Download/index.aspx para comparar." -Color DarkGray
+        $installed = (& nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>$null | Select-Object -First 1).Trim()
+    } catch {}
+
+    if (-not $installed) {
+        Write-UI "  [!] nvidia-smi no disponible o GPU NVIDIA no detectada" -Color Red
+        return
+    }
+
+    Write-UI ("  Driver instalado : $installed") -Color Green
+
+    # Detectar modelo y generacion para consultar la API de NVIDIA correcta
+    $gpuName = $null
+    try {
+        $gpuName = (& nvidia-smi --query-gpu=name --format=csv,noheader 2>$null | Select-Object -First 1).Trim()
+        Write-UI ("  GPU detectada    : $gpuName") -Color Green
+    } catch {}
+
+    # Consultar ultima version disponible via NVIDIA API publica
+    # La API real de NVIDIA requiere psid, pfid, osid complicados. Alternativa: scrape del
+    # JSON que usa la pagina de drivers.
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+    $latestVersion = $null
+    $checkUrl = $null
+
+    # Intentar metodo 1: API gfeclientcontent (la que usa GeForce Experience)
+    try {
+        Write-UI "  Consultando NVIDIA..." -Color DarkGreen
+        # Determinar si es Studio o Game Ready (asumimos Game Ready por defecto)
+        # Para RTX serie 40/50: psid=127, Windows 11 x64: osid=135
+        $apiUrl = 'https://gfwsl.geforce.com/services_toolkit/services/com/nvidia/services/AjaxDriverService.php?func=DriverManualLookup&psid=127&pfid=930&osid=135&lid=1&whql=1&lang=en-us&ctk=0'
+        $resp = Invoke-WebRequest -Uri $apiUrl -UseBasicParsing -TimeoutSec 15 `
+            -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' -ErrorAction Stop
+        $json = $resp.Content | ConvertFrom-Json
+        if ($json.IDS -and $json.IDS[0].downloadInfo) {
+            $latestVersion = $json.IDS[0].downloadInfo.Version
+            $checkUrl = $json.IDS[0].downloadInfo.DownloadURL
+        }
     } catch {
-        Write-UI "  [!] nvidia-smi no disponible" -Color Red
+        Write-UI "    [!] API NVIDIA no respondio, intentando fallback..." -Color DarkYellow
+    }
+
+    if (-not $latestVersion) {
+        # Fallback: pagina publica de drivers
+        try {
+            $pageResp = Invoke-WebRequest -Uri 'https://www.nvidia.com/en-us/drivers/' -UseBasicParsing -TimeoutSec 15 `
+                -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' -ErrorAction Stop
+            if ($pageResp.Content -match '(\d{3}\.\d{2})\s*<') {
+                $latestVersion = $matches[1]
+            }
+        } catch {}
+    }
+
+    if ($latestVersion) {
+        Write-UI ("  Ultimo oficial   : $latestVersion") -Color Green
+
+        # Comparar
+        try {
+            $installedV = [version]$installed
+            $latestV = [version]$latestVersion
+            if ($installedV -ge $latestV) {
+                Write-UI "  Estado           : ACTUALIZADO" -Color Green
+            } else {
+                Write-UI "  Estado           : HAY ACTUALIZACION DISPONIBLE" -Color Yellow
+                if ($checkUrl) {
+                    Write-UI ("  Descarga directa : https://www.nvidia.com$checkUrl") -Color Cyan
+                }
+                Write-UI "  Pagina drivers   : https://www.nvidia.com/Download/index.aspx" -Color Cyan
+            }
+        } catch {
+            Write-UI "  [!] No se pudo comparar versiones" -Color Yellow
+        }
+    } else {
+        Write-UI "  [!] No se pudo consultar ultima version. Verifica manualmente en:" -Color Yellow
+        Write-UI "      https://www.nvidia.com/Download/index.aspx" -Color Cyan
     }
 }
 

@@ -64,21 +64,111 @@ function Fix-Audio {
 
 function Fix-VCRuntimes {
     Write-Host ""
-    Write-UI "Runtimes Visual C++ instalados:" -Color Cyan
-    Invoke-LoggedAction -Description "Listar Visual C++ Redistributables" -AlwaysRun -Action {
-        $installed = Get-CimInstance Win32_Product -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -like '*Visual C++*' -or $_.Name -like '*Microsoft Visual*' } |
-            Select-Object Name, Version
-        if (-not $installed) {
-            Write-UI "       No se encontraron runtimes. Descarga el Microsoft Visual C++ Redistributable." -Color Yellow
-        } else {
-            foreach ($p in $installed) {
-                Write-UI ("       " + $p.Name + " [$($p.Version)]") -Color Green
+    Write-UI "=== REPARACION DE VISUAL C++ RUNTIMES ===" -Color Cyan
+    Write-Host ""
+
+    # Listar instalados actualmente
+    Write-UI "Runtimes Visual C++ instalados actualmente:" -Color Cyan
+    $installed = @()
+    try {
+        # Metodo rapido: registro (Win32_Product es lentisimo)
+        $keys = @(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+        )
+        foreach ($k in $keys) {
+            Get-ChildItem $k -ErrorAction SilentlyContinue | ForEach-Object {
+                $p = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+                if ($p.DisplayName -and $p.DisplayName -match 'Visual C\+\+') {
+                    $installed += [pscustomobject]@{
+                        Name = $p.DisplayName
+                        Version = $p.DisplayVersion
+                    }
+                }
             }
         }
+    } catch {}
+
+    if ($installed.Count -eq 0) {
+        Write-UI "  [!] No se encontraron runtimes VC++ instalados!" -Color Yellow
+    } else {
+        foreach ($p in $installed) {
+            Write-UI ("    " + $p.Name + "  [" + $p.Version + "]") -Color Green
+        }
     }
-    Write-UI "  Descarga lo mas reciente aqui:" -Color DarkYellow
-    Write-UI "    https://aka.ms/vs/17/release/vc_redist.x64.exe" -Color DarkYellow
+
+    Write-Host ""
+    Write-UI "Opciones:" -Color Cyan
+    Write-UI "  [1] Descargar e instalar VC++ Redistributable 2015-2022 x64 (recomendado)" -Color Yellow
+    Write-UI "  [2] Descargar e instalar VC++ Redistributable 2015-2022 x86" -Color Yellow
+    Write-UI "  [3] Instalar AMBOS (x64 + x86)" -Color Yellow
+    Write-UI "  [4] Solo mostrar URLs de descarga" -Color Yellow
+    Write-UI "  [B] Volver" -Color Yellow
+    Write-Host ""
+    Write-UI "  > " -Color Cyan -NoNewline
+    $sub = (Read-Host).Trim().ToUpper()
+
+    switch ($sub) {
+        '1' { Install-VCRedist -Arch 'x64' }
+        '2' { Install-VCRedist -Arch 'x86' }
+        '3' { Install-VCRedist -Arch 'x64'; Install-VCRedist -Arch 'x86' }
+        '4' {
+            Write-UI "  x64: https://aka.ms/vs/17/release/vc_redist.x64.exe" -Color Green
+            Write-UI "  x86: https://aka.ms/vs/17/release/vc_redist.x86.exe" -Color Green
+        }
+        default { return }
+    }
+}
+
+function Install-VCRedist {
+    param([string]$Arch = 'x64')
+
+    $url = "https://aka.ms/vs/17/release/vc_redist.$Arch.exe"
+    $installer = Join-Path $env:TEMP ("vc_redist.$Arch.exe")
+
+    Write-Host ""
+    Write-UI ("Descargando VC++ Redistributable $Arch...") -Color Cyan
+    Write-UI ("  URL: $url") -Color DarkGray
+
+    if ($Global:GF.DryRun) {
+        Write-UI "  [PRUEBA] No se descargara ni instalara. Activa LIVE para ejecutar." -Color DarkYellow
+        return
+    }
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing -TimeoutSec 120 `
+            -UserAgent 'Mozilla/5.0 GameFixer/2.06' -ErrorAction Stop
+        $sizeMB = [math]::Round((Get-Item $installer).Length / 1MB, 1)
+        Write-UI ("  Descargado: $sizeMB MB") -Color Green
+    } catch {
+        Write-UI ("  [X] Error descargando: " + $_.Exception.Message) -Color Red
+        return
+    }
+
+    Write-UI "Instalando..." -Color Cyan
+    Write-UI "  (puede aparecer una ventana de UAC; aceptar)" -Color DarkGray
+    try {
+        # /install /quiet /norestart = silencioso, sin reiniciar
+        $process = Start-Process -FilePath $installer -ArgumentList '/install','/quiet','/norestart' -Wait -PassThru
+        $exitCode = $process.ExitCode
+
+        # Codigos de salida VC++ Redist:
+        #   0    = success
+        #   1638 = newer version already installed
+        #   3010 = success, requires reboot
+        switch ($exitCode) {
+            0    { Write-UI "  [OK] Instalado correctamente" -Color Green }
+            1638 { Write-UI "  [OK] Ya tenias una version igual o mas nueva" -Color Green }
+            3010 { Write-UI "  [OK] Instalado. REINICIA Windows para completar" -Color Yellow }
+            default { Write-UI "  [!] Codigo de salida: $exitCode (consulta docs MS)" -Color Yellow }
+        }
+        if (Test-SoundEnabled) { Play-SuccessChime }
+    } catch {
+        Write-UI ("  [X] Error instalando: " + $_.Exception.Message) -Color Red
+    } finally {
+        Remove-Item $installer -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Fix-InputLag {

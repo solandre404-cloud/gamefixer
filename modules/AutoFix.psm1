@@ -22,7 +22,7 @@ function Invoke-AutoFix {
     Write-Host ""
 
     if ($Global:GF.DryRun) {
-        Write-UI "  [!] DRY-RUN activo: el AutoFix NO modificara nada." -Color DarkYellow
+        Write-UI "  [!] MODO PRUEBA activo: el AutoFix NO modificara nada." -Color DarkYellow
         Write-UI "  [?] Ejecutar de todos modos en modo simulacion? (s/N): " -Color Yellow -NoNewline
     } else {
         Write-UI "  [?] Confirmar ejecucion en modo LIVE? (s/N): " -Color Yellow -NoNewline

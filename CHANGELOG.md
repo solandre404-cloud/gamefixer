@@ -1,37 +1,51 @@
 # CHANGELOG
 
-## v2.02 (FamiliaCuba Edition)
+## v2.06 - "Live & Persistent" (actual)
 
-### ✨ Nuevas características
+### ✨ Nuevas features
 
-- **Auto-Fix [A]**: pipeline completo automático en un solo click (restore point → benchmark antes → diagnóstico → limpieza → optimización → benchmark después → reporte HTML)
-- **Benchmarks [B]**: tests de CPU (single + multi thread), RAM (read/write MB/s), disco (I/O real), red (ping + descarga). Historial JSON + comparativa antes/después
-- **Detector de juegos [G]**: detecta automáticamente Steam, Epic Games, Riot, Battle.net, Ubisoft Connect, EA App, GOG Galaxy, Xbox App. Lee manifiestos oficiales y lista juegos instalados con tamaños
-- **Tweaks por juego [T]**: optimizaciones específicas para CS2, Valorant, LoL, Fortnite, GTA V, RDR2, Minecraft, Apex Legends, R6 Siege
-- **Reportes HTML**: al terminar AutoFix se genera un dashboard HTML profesional con el look cyberpunk del script, comparativas before/after, y resumen de pasos
-- **Sistema de plugins [X]**: arquitectura extensible — droppear un `.psm1` en `/plugins` y se carga automáticamente al arrancar
-- **Plugin de ejemplo**: reloj ASCII para mostrar cómo crear plugins
+- **Dashboard Live [M]**: monitor en tiempo real tipo htop con sparklines Unicode para CPU, GPU, RAM, Temp y Red. Top 5 procesos por uso de CPU. Refresco cada segundo.
+- **Config persistente [S]**: `config.json` guarda preferencias entre sesiones (tema, animación de boot, auto-update, DNS, idioma, etc).
+- **Perfiles exportables [E]**: archivos `.gfprofile` que snapshottean tu config + tweaks de registro + plan de energía + DNS. Compartilos con amigos.
+- **Efectos visuales**: modo `matrix` de arranque con matrix rain, boot messages tipo BIOS, glitch text, progress bars animadas.
 
-### 🎨 UI mejorada
+### 🧪 Tests
 
-- Botón AUTO-FIX destacado al inicio del menú
-- Sección "NUEVO EN v2.02" con las opciones [B] [G] [T] [X]
-- Subtítulos explicativos bajo cada opción
+- +2 archivos de test nuevos (`Config.Tests.ps1`, `Dashboard.Tests.ps1`)
+- 50+ tests totales
 
-### 🔧 Bajo el capó
+### 🎨 Menú
 
-- 6 módulos nuevos (`AutoFix`, `Benchmark`, `GameDetector`, `GameTweaks`, `HtmlReport`, `PluginLoader`)
-- Nuevas carpetas `/reports`, `/benchmarks`, `/plugins`
-- Score global de gaming normalizado 0-100 basado en hardware
+- Nuevas teclas: [M] Dashboard, [S] Settings, [E] Export/Import
+- [C] renombrada a [I] Info para liberar espacio
+- Reorganización visual de la segunda fila de opciones
 
-## v2.1
+## v2.05 - "CI/CD Edition"
 
-- Release inicial con arquitectura modular
-- 14 módulos de funcionalidad
-- Sistema de logging
-- Auto-elevación a admin
-- DRY-RUN por defecto
-- Telemetría en vivo
-- Integración con nvidia-smi
-- Backups automáticos del registro
+- Suite de tests Pester 5 con 40+ tests (Unit + Integration)
+- GitHub Actions workflow con Pester + PSScriptAnalyzer
+- README rediseñado con badges (CI, License, Release)
+- LICENSE MIT
+
+## v2.04 - "Bug fixes"
+
+- Disk benchmark testea TODOS los drives, no solo C:
+- Speed test adaptativo (10-500MB según velocidad)
+- Submenús con loop interno
+- GPU VRAM ya no satura en 4GB
+
+## v2.03 - "Multi-drive"
+
+- Panel HARDWARE muestra barra por cada disco
+- Xbox Game Pass detectado (Appx + ModifiableWindowsApps)
+- Detección reforzada EA App y Ubisoft
+
+## v2.02 - "Gaming Edition"
+
+- AutoFix, Benchmarks, GameDetector, GameTweaks, HtmlReport, Plugins
+
+## v2.1 - "Initial release"
+
+- Arquitectura modular (14 módulos)
 - Auto-update desde GitHub
+- DRY-RUN por defecto

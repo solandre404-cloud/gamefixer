@@ -95,15 +95,21 @@ function Test-UpdateAvailable {
     $remoteVersion  = Get-RemoteVersion
 
     if (-not $remoteVersion) {
-        return @{ Available = $false; Reason = 'No se pudo consultar GitHub' }
+        return @{ Available = $false; Reason = 'No se pudo consultar GitHub (sin internet?)' }
     }
 
     $cmp = Compare-SemVer -Current $currentVersion -Remote $remoteVersion
     if ($cmp -lt 0) {
+        # Hay update: traer tambien info del release
+        $releaseInfo = Get-LatestReleaseInfo
         return @{
-            Available = $true
-            Current   = $currentVersion
-            Remote    = $remoteVersion
+            Available   = $true
+            Current     = $currentVersion
+            Remote      = $remoteVersion
+            ReleaseName = if ($releaseInfo) { $releaseInfo.Name } else { $null }
+            Body        = if ($releaseInfo) { $releaseInfo.Body } else { $null }
+            ZipUrl      = if ($releaseInfo) { $releaseInfo.ZipUrl } else { $null }
+            HtmlUrl     = if ($releaseInfo) { $releaseInfo.HtmlUrl } else { $null }
         }
     }
     return @{
@@ -137,6 +143,110 @@ function Invoke-SilentUpdateCheck {
     } else {
         Write-Log -Level INFO -Message "Updater: sin actualizaciones ($($check.Reason))"
         $Global:GF.UpdateAvailable = $null
+    }
+}
+
+function Invoke-ForcedUpdateCheck {
+    <#
+    .SYNOPSIS
+    Check al arranque que BLOQUEA el acceso al menu hasta que el usuario decida.
+    Si hay update, pregunta si actualizar ahora, saltar (una sola vez), o salir.
+    #>
+    Write-Log -Level INFO -Message "Updater: verificacion forzada al arrancar..."
+    Clear-Host
+
+    # Mostrar mensaje mientras consulta
+    Write-UI "" -Color Green
+    Write-UI "  Verificando actualizaciones disponibles..." -Color Cyan
+    Write-UI "  (conectando con GitHub, unos segundos)" -Color DarkGray
+    Write-Host ""
+
+    $check = Test-UpdateAvailable
+
+    if (-not $check.Available) {
+        # Sin update disponible - continuar normal
+        Write-UI "  [OK] Estas usando la ultima version disponible." -Color Green
+        Write-Log -Level INFO -Message "Updater: sin actualizaciones"
+        $Global:GF.UpdateAvailable = $null
+        Start-Sleep -Seconds 1
+        return $true  # seguir al menu
+    }
+
+    # HAY UPDATE - bloquear y pedir decision
+    $Global:GF.UpdateAvailable = $check
+
+    Clear-Host
+    Write-Host ""
+    Write-UI ('=' * 78) -Color Yellow
+    Write-UI "" -NoNewline
+    Write-UI "                      NUEVA VERSION DISPONIBLE" -Color Yellow
+    Write-UI ('=' * 78) -Color Yellow
+    Write-Host ""
+    Write-UI ("  Tu version actual: v" + $check.Current) -Color Cyan
+    Write-UI ("  Ultima publicada : v" + $check.Remote) -Color Green
+    Write-Host ""
+
+    if ($check.ReleaseName) {
+        Write-UI ("  Release: " + $check.ReleaseName) -Color Cyan
+    }
+    if ($check.Body) {
+        Write-Host ""
+        Write-UI "  Novedades:" -Color Cyan
+        # Mostrar primeras 10 lineas del changelog
+        $lines = $check.Body -split "`n" | Select-Object -First 10
+        foreach ($line in $lines) {
+            $trimmed = $line.Trim()
+            if ($trimmed) {
+                Write-UI ("    " + $trimmed) -Color Green
+            }
+        }
+    }
+
+    Write-Host ""
+    Write-UI ('-' * 78) -Color DarkYellow
+    Write-UI "  Se recomienda actualizar para tener los ultimos arreglos y features." -Color Yellow
+    Write-Host ""
+    Write-UI "  [A] Actualizar AHORA (recomendado)" -Color Green
+    Write-UI "  [O] Omitir esta vez (seguir con la version actual)" -Color Yellow
+    Write-UI "  [Q] Salir de GameFixer" -Color DarkGray
+    Write-Host ""
+    Write-UI "  > Eleccion: " -Color Cyan -NoNewline
+
+    $response = (Read-Host).Trim().ToUpper()
+
+    switch ($response) {
+        'A' {
+            Write-Host ""
+            Write-UI "  Iniciando actualizacion..." -Color Cyan
+            try {
+                Install-Update -ReleaseInfo $check
+                # Install-Update hace exit cuando termina
+            } catch {
+                Write-UI ("  [X] Error durante actualizacion: " + $_.Exception.Message) -Color Red
+                Write-UI "  Podes intentar desde [U] en el menu, o descargar manualmente desde GitHub." -Color Yellow
+                Write-Host ""
+                Write-UI "  Presiona ENTER para continuar con la version actual..." -Color DarkGreen -NoNewline
+                [void](Read-Host)
+                return $true
+            }
+            return $false  # no deberia llegar aca
+        }
+        'O' {
+            Write-UI "  Continuando con v$($check.Current). Podes actualizar mas tarde con [U]." -Color Yellow
+            Write-Log -Level INFO -Message "Updater: usuario omitio actualizacion a v$($check.Remote)"
+            Start-Sleep -Seconds 2
+            return $true
+        }
+        'Q' {
+            Write-UI "  Cerrando GameFixer. Hasta la proxima." -Color Green
+            Start-Sleep -Seconds 1
+            exit 0
+        }
+        default {
+            Write-UI "  Opcion no reconocida, asumimos 'omitir'..." -Color Yellow
+            Start-Sleep -Seconds 2
+            return $true
+        }
     }
 }
 
@@ -282,4 +392,4 @@ function Install-Update {
 
 Export-ModuleMember -Function Get-RemoteVersion, Get-LatestReleaseInfo, `
     Compare-SemVer, Test-UpdateAvailable, Invoke-SilentUpdateCheck, `
-    Invoke-UpdaterMenu, Install-Update
+    Invoke-ForcedUpdateCheck, Invoke-UpdaterMenu, Install-Update
