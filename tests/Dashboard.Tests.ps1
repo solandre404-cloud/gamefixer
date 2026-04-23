@@ -39,9 +39,10 @@ Describe 'ConvertTo-Sparkline' {
     It 'valor 0 devuelve un caracter bajo o vacio' {
         $result = ConvertTo-Sparkline -Values @(0) -Max 100
         $result.Length | Should -BeGreaterOrEqual 1
-        # El mas bajo del set o espacio
+        # El carácter debe estar en el rango válido del set de sparklines (U+2581 a U+2588) o ser un espacio
         $code = [int]([char]$result[0])
-        ($code -eq 0x20 -or $code -le 0x2583) | Should -BeTrue
+        $isValid = ($code -eq 0x20) -or ($code -ge 0x2581 -and $code -le 0x2588)
+        $isValid | Should -BeTrue
     }
 
     It 'array vacio devuelve string vacio' {
