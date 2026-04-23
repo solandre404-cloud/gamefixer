@@ -61,7 +61,7 @@ trap {
 
 # --- Configuracion global ---------------------------------------------------
 $Global:GF = @{
-    Version            = 'v2.08'
+    Version            = 'v2.09'
     Build              = '2604'
     Profile            = $Profile
     DryRun             = -not $Live

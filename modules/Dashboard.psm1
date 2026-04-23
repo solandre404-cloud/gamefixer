@@ -10,12 +10,22 @@ $Script:SparkChars = @(
 
 function ConvertTo-Sparkline {
     param([int[]]$Values, [int]$Max = 100)
+
+    # Inicializacion defensiva para tests que importan el modulo en contextos distintos
+    if (-not $Script:SparkChars -or $Script:SparkChars.Count -eq 0) {
+        $Script:SparkChars = @(
+            [char]0x2581, [char]0x2582, [char]0x2583, [char]0x2584,
+            [char]0x2585, [char]0x2586, [char]0x2587, [char]0x2588
+        )
+    }
+
     if (-not $Values -or $Values.Count -eq 0) { return '' }
+    if ($Max -le 0) { $Max = 1 }
+
     $sb = New-Object System.Text.StringBuilder
     foreach ($v in $Values) {
         if ($null -eq $v) { [void]$sb.Append(' '); continue }
         $norm = [math]::Max(0, [math]::Min($Max, $v))
-        if ($Max -le 0) { $Max = 1 }
         $idx = [int]([math]::Floor(($norm / $Max) * ($Script:SparkChars.Count - 1)))
         if ($idx -lt 0) { $idx = 0 }
         if ($idx -ge $Script:SparkChars.Count) { $idx = $Script:SparkChars.Count - 1 }
